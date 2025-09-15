@@ -1,0 +1,16 @@
+{
+  "manifest_version": 3,
+  "name": "Quirra Overlay",
+  "version": "1.0.0",
+  "description": "Holographic overlay for AI provenance & originality.",
+  "permissions": ["storage", "activeTab", "scripting"],
+  "host_permissions": ["<all_urls>"],
+  "action": { "default_title": "Quirra" },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "run_at": "document_end"
+    }
+  ]
+}

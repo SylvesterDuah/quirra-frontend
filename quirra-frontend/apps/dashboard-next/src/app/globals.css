@@ -1,0 +1,55 @@
+/* Tailwind v4 single import */
+@import "tailwindcss";
+
+/* THEME TOKENS */
+:root {
+  color-scheme: light dark;
+  --bg: #000000;
+  --fg: #e6e6ea;
+  --card: rgba(255, 255, 255, 0.05);
+  --card-border: rgba(255, 255, 255, 0.12);
+  --muted: rgba(255, 255, 255, 0.7);
+  --btn: #2e2f30;
+  --btn-hover: #3d434b;
+}
+
+/* Light theme override */
+:root[data-theme="light"] {
+  --bg: #f7f7fb;
+  --fg: #0b0b10;
+  --card: rgba(0, 0, 0, 0.03);
+  --card-border: rgba(0, 0, 0, 0.08);
+  --muted: rgba(0, 0, 0, 0.7);
+  --btn: #63666b;
+  --btn-hover: #2e2f30;
+}
+
+html, body { height: 100%; }
+body { background: var(--bg); color: var(--fg); }
+
+a { color: inherit; text-decoration: none; }
+
+/* Simple content container utility */
+.container { margin-left: auto; margin-right: auto; max-width: 1100px; padding-left: 1.5rem; padding-right: 1.5rem; }
+
+/* AURA — subtle holographic field behind content */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(1200px 600px at 70% -10%, color-mix(in oklab, var(--btn), transparent 85%), transparent 60%),
+    radial-gradient(900px 500px at -10% 100%, color-mix(in oklab, #00c8ff, transparent 90%), transparent 60%),
+    radial-gradient(700px 400px at 120% 40%, color-mix(in oklab, #ff0080, transparent 94%), transparent 60%);
+  z-index: -1;
+}
+
+/* Prevent horizontal scroll / squeezing */
+html, body { max-width: 100%; overflow-x: hidden; }
+
+/* Page shells */
+main, header, footer { width: 100%; }
+
+/* Sticky header above content */
+header { z-index: 50; }
