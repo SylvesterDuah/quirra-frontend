@@ -1,32 +1,30 @@
 {
   "compilerOptions": {
-    "target": "ES2022",
-    "lib": ["dom", "dom.iterable", "esnext"],
+    "target": "ES2021",
+    "lib": ["dom", "dom.iterable", "es2021"],
     "module": "esnext",
     "moduleResolution": "bundler",
-    "jsx": "preserve",
-    "types": ["chrome"],
-
     "strict": true,
     "skipLibCheck": true,
-
     "resolveJsonModule": true,
     "esModuleInterop": true,
     "isolatedModules": true,
-
-    "baseUrl": ".",
-    "paths": { "@/*": ["src/*"] },
-
-    "plugins": [{ "name": "next" }],
-
-    "allowJs": false,
-    "noEmit": true,
-    "incremental": true
+    "jsx": "preserve",
+    "baseUrl": "src",
+    "paths": { "@/*": ["./*"] }
   },
   "include": [
     "next-env.d.ts",
-    "src/**/*",
+    "src/app/**/*",
+    "src/components/**/*",
+    "src/lib/**/*",
     ".next/types/**/*.ts"
   ],
-  "exclude": ["node_modules"]
+  "exclude": [
+    "node_modules",
+    "src/options.ts",
+    "src/content.ts",
+    "src/overlay.ts",
+    "src/options.html"
+  ]
 }
