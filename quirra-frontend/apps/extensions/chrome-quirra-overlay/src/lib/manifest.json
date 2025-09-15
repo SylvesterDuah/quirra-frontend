@@ -1,0 +1,25 @@
+{
+  "manifest_version": 3,
+  "name": "Quirra Holographic Overlay",
+  "version": "0.1.0",
+  "description": "See-through overlay that analyzes prompts & responses via Quirra backend.",
+  "permissions": ["storage", "activeTab", "scripting"],
+  "host_permissions": ["http://*/*", "https://*/*"],
+  "options_page": "options.html",
+  "background": { "service_worker": "background.js" },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "exclude_matches": [
+        "http://localhost/*",
+        "http://localhost:3000/*",
+        "http://127.0.0.1/*",
+        "http://127.0.0.1:3000/*",
+        "https://localhost/*",
+        "https://127.0.0.1/*"
+      ],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

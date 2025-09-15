@@ -1,0 +1,6 @@
+{
+  "files": [],
+  "references": [
+    { "path": "quirra-frontend/apps/dashboard-next" }
+  ]
+}

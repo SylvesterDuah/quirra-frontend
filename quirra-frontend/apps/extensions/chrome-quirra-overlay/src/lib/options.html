@@ -1,0 +1,23 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <title>Quirra Settings</title>
+  <style> body{font:14px system-ui; padding:16px;} input{width:100%; padding:8px; margin:6px 0;} button{padding:8px 12px;} .row{margin-bottom:10px} </style>
+</head>
+<body>
+  <h2>Quirra Settings</h2>
+  <div class="row">
+    <label>Backend URL</label>
+    <input id="baseUrl" placeholder="http://127.0.0.1:8000"/>
+  </div>
+  <div class="row">
+    <label>X-Quirra-Secret (optional)</label>
+    <input id="secret" placeholder=""/>
+  </div>
+  <div class="row">
+    <button id="save">Save</button>
+  </div>
+  <script src="options.js"></script>
+</body>
+</html>
