@@ -1,10 +1,12 @@
+// src/components/header.tsx
 "use client";
 
 import Image from "next/image";
 import Link from "next/link";
 import { useState } from "react";
 import clsx from "clsx";
-import ThemeToggle from "@/components/theme-toggle";
+import ThemeToggle from "./theme-toggle";
+
 
 export default function Header() {
   const [open, setOpen] = useState(false);
@@ -20,25 +22,23 @@ export default function Header() {
       <div className="mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8">
         {/* Taller header so the big logo fits nicely */}
         <div className="min-h-[72px] md:min-h-[92px] flex items-center justify-between">
-          {/* Brand: BIG logo, switches by theme */}
+          {/* Brand: BIG logo, theme-switched via global CSS classes */}
           <Link href="/" className="inline-flex items-center gap-3">
             <span className="relative block h-12 w-[220px] sm:h-16 sm:w-[280px] md:h-20 md:w-[340px]">
-              {/* Light logo (shows in light) */}
               <Image
                 src="/logo1.png"
-                alt="Quirra"
+                alt="Quirra (light)"
                 fill
-                className="object-contain logo-light"
                 priority
+                className="object-contain logo-light"
                 sizes="(max-width: 640px) 220px, (max-width: 768px) 280px, 340px"
               />
-              {/* Dark logo (shows in dark) */}
               <Image
                 src="/logo2.png"
-                alt="Quirra"
+                alt="Quirra (dark)"
                 fill
-                className="object-contain logo-dark"
                 priority
+                className="object-contain logo-dark"
                 sizes="(max-width: 640px) 220px, (max-width: 768px) 280px, 340px"
               />
             </span>
@@ -47,15 +47,9 @@ export default function Header() {
 
           {/* Desktop nav */}
           <nav className="hidden md:flex items-center gap-6 text-sm text-[color:var(--muted)]">
-            <Link href="/#how-it-works" className="hover:text-[color:var(--fg)]">
-              How it works
-            </Link>
-            <Link href="/#features" className="hover:text-[color:var(--fg)]">
-              Features
-            </Link>
-            <Link href="/install" className="hover:text-[color:var(--fg)]">
-              Install
-            </Link>
+            <Link href="/#how-it-works" className="hover:text-[color:var(--fg)]">How it works</Link>
+            <Link href="/#features" className="hover:text-[color:var(--fg)]">Features</Link>
+            <Link href="/install" className="hover:text-[color:var(--fg)]">Install</Link>
           </nav>
 
           {/* Right: Theme + CTA / Burger */}
@@ -67,6 +61,8 @@ export default function Header() {
             >
               Add to Browser
             </Link>
+
+            {/* Mobile menu button */}
             <button
               aria-label="Toggle menu"
               className="md:hidden inline-flex h-10 w-10 items-center justify-center rounded-md border border-[var(--card-border)] bg-white/5"
@@ -85,46 +81,15 @@ export default function Header() {
       {/* Mobile drawer */}
       <div className={clsx("md:hidden transition-[max-height,opacity] overflow-hidden", open ? "max-h-64 opacity-100" : "max-h-0 opacity-0")}>
         <nav className="px-4 sm:px-6 lg:px-8 pb-4 grid gap-2 text-sm">
-          <Link href="/#how-it-works" className="rounded-lg px-3 py-2 hover:bg-white/5" onClick={() => setOpen(false)}>
-            How it works
-          </Link>
-          <Link href="/#features" className="rounded-lg px-3 py-2 hover:bg-white/5" onClick={() => setOpen(false)}>
-            Features
-          </Link>
-          <Link href="/install" className="rounded-lg px-3 py-2 hover:bg-white/5" onClick={() => setOpen(false)}>
-            Install
-          </Link>
-          <Link
-            href="/install"
-            className="mt-1 rounded-xl bg-[var(--btn)] px-4 py-2 text-sm font-semibold text-white hover:bg-[var(--btn-hover)]"
-            onClick={() => setOpen(false)}
-          >
+          <Link href="/#how-it-works" className="rounded-lg px-3 py-2 hover:bg-white/5" onClick={() => setOpen(false)}>How it works</Link>
+          <Link href="/#features" className="rounded-lg px-3 py-2 hover:bg-white/5" onClick={() => setOpen(false)}>Features</Link>
+          <Link href="/install" className="rounded-lg px-3 py-2 hover:bg-white/5" onClick={() => setOpen(false)}>Install</Link>
+          <Link href="/install" className="mt-1 rounded-xl bg-[var(--btn)] px-4 py-2 text-sm font-semibold text-white hover:bg-[var(--btn-hover)]" onClick={() => setOpen(false)}>
             Add to Browser
           </Link>
         </nav>
       </div>
-
-      {/* Make theme switching global so only ONE logo shows */}
-      <style jsx global>{`
-        .logo-light { display: block; }
-        .logo-dark { display: none; }
-
-        html[data-theme="dark"] .logo-light { display: none !important; }
-        html[data-theme="dark"] .logo-dark { display: block !important; }
-
-        html[data-theme="light"] .logo-light { display: block !important; }
-        html[data-theme="light"] .logo-dark { display: none !important; }
-
-        /* If no explicit data-theme, follow system setting */
-        @media (prefers-color-scheme: dark) {
-          html:not([data-theme]) .logo-light { display: none !important; }
-          html:not([data-theme]) .logo-dark { display: block !important; }
-        }
-        @media (prefers-color-scheme: light) {
-          html:not([data-theme]) .logo-light { display: block !important; }
-          html:not([data-theme]) .logo-dark { display: none !important; }
-        }
-      `}</style>
     </header>
   );
 }
+

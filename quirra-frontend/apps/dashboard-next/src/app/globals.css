@@ -26,13 +26,12 @@
 
 html, body { height: 100%; }
 body { background: var(--bg); color: var(--fg); }
-
 a { color: inherit; text-decoration: none; }
 
-/* Simple content container utility */
+/* Container */
 .container { margin-left: auto; margin-right: auto; max-width: 1100px; padding-left: 1.5rem; padding-right: 1.5rem; }
 
-/* AURA — subtle holographic field behind content */
+/* AURA background */
 body::before {
   content: "";
   position: fixed;
@@ -45,28 +44,20 @@ body::before {
   z-index: -1;
 }
 
-/* Prevent horizontal scroll / squeezing */
 html, body { max-width: 100%; overflow-x: hidden; }
-
-/* Page shells */
 main, header, footer { width: 100%; }
-
-/* Sticky header above content */
 header { z-index: 50; }
 
-
-
-/* Logo theme switching (no styled-jsx needed) */
+/* THEME-DRIVEN LOGO SWITCHING */
 .logo-light { display: block; }
 .logo-dark  { display: none; }
 
-html[data-theme="dark"] .logo-light { display: none; }
-html[data-theme="dark"] .logo-dark  { display: block; }
-
+html[data-theme="dark"]  .logo-light { display: none; }
+html[data-theme="dark"]  .logo-dark  { display: block; }
 html[data-theme="light"] .logo-light { display: block; }
 html[data-theme="light"] .logo-dark  { display: none; }
 
-/* Respect system preference when no manual theme chosen */
+/* Follow system preference when no manual theme chosen */
 @media (prefers-color-scheme: dark) {
   html:not([data-theme]) .logo-light { display: none; }
   html:not([data-theme]) .logo-dark  { display: block; }

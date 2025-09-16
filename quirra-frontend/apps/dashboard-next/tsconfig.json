@@ -8,16 +8,16 @@
     ],
     "module": "esnext",
     "moduleResolution": "bundler",
+    "jsx": "preserve",
     "strict": true,
     "skipLibCheck": true,
     "resolveJsonModule": true,
     "esModuleInterop": true,
     "isolatedModules": true,
-    "jsx": "preserve",
-    "baseUrl": "src",
+    "baseUrl": ".",
     "paths": {
       "@/*": [
-        "./*"
+        "src/*"
       ]
     },
     "allowJs": true,
@@ -31,16 +31,11 @@
   },
   "include": [
     "next-env.d.ts",
-    "src/app/**/*",
-    "src/components/**/*",
-    "src/lib/**/*",
+    "src/**/*.ts",
+    "src/**/*.tsx",
     ".next/types/**/*.ts"
   ],
   "exclude": [
-    "node_modules",
-    "src/options.ts",
-    "src/content.ts",
-    "src/overlay.ts",
-    "src/options.html"
+    "node_modules"
   ]
 }
