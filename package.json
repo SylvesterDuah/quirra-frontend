@@ -8,6 +8,11 @@
     "start": "npm run start -w quirra-frontend/apps/dashboard-next",
     "pack:overlay": "node scripts/pack-overlay.mjs"
   },
+  "overrides": {
+    "react": "18.2.0",
+    "react-dom": "18.2.0",
+    "styled-jsx": "5.1.1"
+  },
   "devDependencies": {
     "zip-a-folder": "^1.1.0"
   }
