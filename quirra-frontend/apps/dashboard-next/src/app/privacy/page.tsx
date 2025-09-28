@@ -53,10 +53,10 @@ export default function PrivacyPage() {
             duahsylvester24@gmail.com
           </a>
           <br />
-          Postal (optional): Your Company / Legal Entity, Street, City, Country
+          Postal (optional): Quirra / USA
         </address>
         <p className="text-sm text-[color:var(--muted)]">
-          <em>Replace the contact details above with your actual privacy contact before publishing.</em>
+          <em>duahsylvester24@gmail.com</em>
         </p>
 
         <h2 id="scope" className="text-xl font-semibold">Scope</h2>
