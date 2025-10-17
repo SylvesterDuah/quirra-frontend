@@ -1,0 +1,17 @@
+{
+  "manifest_version": 3,
+  "name": "Quirra Overlay",
+  "version": "0.1.0",
+  "description": "See-through provenance overlay for AI answers. Detect if your AI response have been generated before.",
+  "permissions": ["storage", "activeTab", "scripting"],
+  "host_permissions": ["<all_urls>"],
+  "action": { "default_title": "Quirra" },
+  "options_page": "options.html",
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

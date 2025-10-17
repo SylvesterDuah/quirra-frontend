@@ -1,4 +1,5 @@
 // quirra-frontend/apps/extensions/chrome-quirra-overlay/src/overlay.ts
+
 export type Scores = {
   duplication_pct: number;
   style_pct: number;
@@ -19,12 +20,22 @@ export class QuirraOverlay {
   private content: HTMLDivElement;
   private mounted = false;
 
+  // bound handlers so we can add/remove cleanly
+  private onKeyDown = (e: KeyboardEvent) => {
+    if (e.altKey) document.documentElement.classList.add("quirra-alt");
+  };
+  private onKeyUp = () => {
+    document.documentElement.classList.remove("quirra-alt");
+  };
+
   constructor() {
     this.root = document.createElement("div");
     this.root.className = "quirra-overlay";
     this.root.setAttribute("aria-live", "polite");
+
     this.content = document.createElement("div");
     this.content.className = "quirra-card";
+
     this.root.appendChild(this.content);
   }
 
@@ -34,19 +45,22 @@ export class QuirraOverlay {
     document.body.appendChild(this.root);
     this.mounted = true;
 
-    const onDown = (e: KeyboardEvent) => { if (e.altKey) document.documentElement.classList.add("quirra-alt"); };
-    const onUp   = () => document.documentElement.classList.remove("quirra-alt");
-    window.addEventListener("keydown", onDown);
-    window.addEventListener("keyup", onUp);
-    window.addEventListener("blur", onUp);
+    window.addEventListener("keydown", this.onKeyDown);
+    window.addEventListener("keyup", this.onKeyUp);
+    window.addEventListener("blur", this.onKeyUp);
   }
 
   destroy() {
+    if (!this.mounted) return;
     this.root.remove();
     document.documentElement.classList.remove("quirra-alt");
+    window.removeEventListener("keydown", this.onKeyDown);
+    window.removeEventListener("keyup", this.onKeyUp);
+    window.removeEventListener("blur", this.onKeyUp);
     this.mounted = false;
   }
 
+  /** Generic analyzing state (response path) */
   showAnalyzing() {
     this.mount();
     this.content.innerHTML = `
@@ -56,25 +70,75 @@ export class QuirraOverlay {
     `;
   }
 
+  /** Error bubble */
   showError(msg = "Something went wrong") {
     this.mount();
     this.content.innerHTML = `
       <div class="qr-head">Quirra</div>
-      <div class="qr-err">⚠️ ${escapeHtml(msg)}</div>
+      <div class="qr-err">${escapeHtml(msg)}</div>
       <div class="qr-hint">Hold <b>Alt</b> to interact</div>
     `;
   }
 
+  /** NEW: analyzing state for prompt checks */
+  showPromptAnalyzing() {
+    this.mount();
+    this.content.innerHTML = `
+      <div class="qr-head">Quirra</div>
+      <div class="qr-row"><span class="qr-dot"></span><span>Analyzing prompt…</span></div>
+      <div class="qr-hint">Hold <b>Alt</b> to interact</div>
+    `;
+  }
+
+  /** NEW: prompt result bubble with suggestions */
+  showPromptResults(scores: Scores, suggestions: string[]) {
+    this.mount();
+    const riskCls =
+      scores.risk >= 75 ? "qr-red" : scores.risk >= 45 ? "qr-amber" : "qr-green";
+
+    const tips =
+      suggestions && suggestions.length
+        ? `<ul class="qr-list">${suggestions
+            .map((s) => `<li>${escapeHtml(s)}</li>`)
+            .join("")}</ul>`
+        : `<div class="qr-sub">No suggestions — looks good</div>`;
+
+    this.content.innerHTML = `
+      <div class="qr-head">Quirra</div>
+      <div class="qr-metrics">
+        <div>Prompt risk: <b class="${riskCls}">${scores.risk}%</b>
+          <span class="qr-sub"> · dup ${scores.duplication_pct}% · style ${scores.style_pct}%</span>
+        </div>
+      </div>
+      <div class="qr-section">
+        <div class="qr-title">Suggestions</div>
+        ${tips}
+      </div>
+      <div class="qr-hint">Hold <b>Alt</b> to interact</div>
+    `;
+  }
+
+  /** Response results with neighbor list */
   showResults(scores: Scores, neighbors: Neighbor[]) {
     this.mount();
-    const riskCls = scores.risk >= 75 ? "qr-red" : scores.risk >= 45 ? "qr-amber" : "qr-green";
-    const list = neighbors.slice(0, 5).map(n => {
-      const sim = n.similarity != null ? ` · sim ${(n.similarity * 100).toFixed(0)}%` : "";
-      const ctx = n.context ? ` · ${escapeHtml(n.context)}` : "";
-      const when = n.when ? ` · ${escapeHtml(timeAgo(n.when))}` : "";
-      const ref = n.url ? ` · <a href="${escapeAttr(n.url)}" target="_blank" rel="noopener noreferrer">ref</a>` : "";
-      return `<li>• ${n.event_id.slice(0, 8)}${ctx}${when}${sim}${ref}</li>`;
-    }).join("");
+    const riskCls =
+      scores.risk >= 75 ? "qr-red" : scores.risk >= 45 ? "qr-amber" : "qr-green";
+
+    const list = neighbors
+      .slice(0, 5)
+      .map((n) => {
+        const sim =
+          n.similarity != null ? ` · sim ${(n.similarity * 100).toFixed(0)}%` : "";
+        const ctx = n.context ? ` · ${escapeHtml(n.context)}` : "";
+        const when = n.when ? ` · ${escapeHtml(timeAgo(n.when))}` : "";
+        const ref = n.url
+          ? ` · <a href="${escapeAttr(
+              n.url
+            )}" target="_blank" rel="noopener noreferrer">ref</a>`
+          : "";
+        return `<li>• ${escapeHtml(n.event_id.slice(0, 8))}${ctx}${when}${sim}${ref}</li>`;
+      })
+      .join("");
 
     this.content.innerHTML = `
       <div class="qr-head">Quirra</div>
@@ -92,6 +156,7 @@ export class QuirraOverlay {
     `;
   }
 
+  /** Injects minimal glassmorphism styles once */
   private injectStyles() {
     if (document.getElementById("quirra-overlay-styles")) return;
     const css = `
@@ -125,10 +190,17 @@ export class QuirraOverlay {
   }
 }
 
+/* ---------- helpers ---------- */
+
 function escapeHtml(s: string) {
-  return (s || "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]!));
+  return (s || "").replace(
+    /[&<>"]/g,
+    (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]!
+  ));
 }
-function escapeAttr(s: string) { return escapeHtml(s); }
+function escapeAttr(s: string) {
+  return escapeHtml(s);
+}
 function timeAgo(iso?: string) {
   if (!iso) return "";
   const then = new Date(iso).getTime();

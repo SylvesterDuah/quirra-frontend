@@ -1,17 +1,24 @@
 {
   "manifest_version": 3,
-  "name": "Quirra Overlay",
+  "name": "Quirra",
+  "short_name": "Quirra",
   "version": "0.1.0",
-  "description": "See-through provenance overlay for AI answers. Detect near-matches, context, and suggestions.",
-  "permissions": ["storage", "activeTab", "scripting"],
-  "host_permissions": ["<all_urls>"],
-  "action": { "default_title": "Quirra" },
-  "options_page": "options.html",
+  "description": "Non-blocking overlay that provides prompt/response analysis and suggestions.",
+  "permissions": [
+    "storage"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
   "content_scripts": [
     {
-      "matches": ["<all_urls>"],
+      "matches": ["http://*/*", "https://*/*"],
       "js": ["content.js"],
       "run_at": "document_idle"
     }
-  ]
+  ],
+  "options_page": "options.html",
+  "action": {
+    "default_title": "Quirra Overlay"
+  }
 }

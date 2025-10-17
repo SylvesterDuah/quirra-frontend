@@ -142,3 +142,6 @@ if (!/^(localhost|127\.0\.0\.1)$/.test(location.hostname)) {
     return s;
   }
 }
+
+
+

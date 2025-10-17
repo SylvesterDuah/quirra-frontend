@@ -1,7 +1,16 @@
 {
-  "workspaces": ["quirra-frontend/apps/dashboard-next"],
+  "workspaces": [
+    "quirra-frontend/apps/dashboard-next",
+    "quirra-frontend/apps/extensions/chrome-quirra-overlay"
+  ],
   "scripts": {
     "build": "npm run build -w quirra-frontend/apps/dashboard-next",
-    "start": "npm run start -w quirra-frontend/apps/dashboard-next"
+    "start": "npm run start -w quirra-frontend/apps/dashboard-next",
+    "pack:overlay": "npm run pack -w quirra-frontend/apps/extensions/chrome-quirra-overlay"
+  },
+  "devDependencies": {
+    "@types/react": "^19.1.14",
+    "@types/react-dom": "^19.1.9",
+    "esbuild": "^0.25.10"
   }
 }
