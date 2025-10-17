@@ -1,6 +1,6 @@
 // content.js
+const DEFAULT_BACKEND = "https://quirra-api.onrender.com/api"; 
 
-const DEFAULT_BACKEND = "https://quirra-api.onrender.com";
 const DEFAULT_SECRET = "";
 
 // ====== tiny settings helpers ======
