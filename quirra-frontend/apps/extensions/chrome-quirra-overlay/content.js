@@ -1,18 +1,16 @@
-// content.js
-const DEFAULT_BACKEND = "https://quirra-api.onrender.com/api"; 
-
+// content.js — Quirra overlay content script (final)
+const DEFAULT_BACKEND = "https://quirra-api.onrender.com";
 const DEFAULT_SECRET = "";
 
 // ====== tiny settings helpers ======
 async function getSettings() {
   try {
     const v = await chrome.storage.sync.get({ backend: "", secret: "" });
-    // if storage empty, fall back to defaults (this prevents false "not configured" when a DEFAULT exists)
-    const backend = (v.backend || "").trim() || DEFAULT_BACKEND;
+    const backend = ((v.backend || "").trim() || DEFAULT_BACKEND).replace(/\/+$/, "");
     const secret = (v.secret || "").trim() || DEFAULT_SECRET;
     return { backend, secret };
   } catch (e) {
-    // storage may be unavailable in some contexts -> use defaults
+    console.debug("Quirra: storage.get failed, using defaults", e);
     return { backend: DEFAULT_BACKEND, secret: DEFAULT_SECRET };
   }
 }
@@ -21,9 +19,7 @@ function isPublicUrl(href) {
   try {
     const u = new URL(href);
     return ["http:", "https:"].includes(u.protocol) && u.hostname !== "localhost";
-  } catch {
-    return false;
-  }
+  } catch { return false; }
 }
 function inferContext(text) {
   const t = (text || "").toLowerCase();
@@ -42,71 +38,67 @@ async function getStableBrowserId() {
     await chrome.storage.local.set({ [key]: id });
     return id;
   } catch (e) {
-    // storage may fail — return a transient id
+    console.debug("Quirra: storage.local unavailable, fallback id", e);
     return (crypto.randomUUID && crypto.randomUUID()) || String(Math.random()).slice(2);
   }
 }
 
 // ====== backend API helpers ======
 async function safeJson(res) {
-  // Try parse JSON; if it fails, return an object containing raw text plus status for easier debugging.
+  const ct = res && res.headers ? (res.headers.get("content-type") || "") : "";
   try {
+    if (ct.includes("application/json")) return await res.json();
+    // try parse anyway for leniency
     return await res.json();
-  } catch (err) {
-    try {
-      const text = await res.text();
-      console.warn("Quirra: non-JSON response from server", { status: res.status, text });
-      return { __raw_text: text, __status: res.status, __ok: res.ok };
-    } catch (e) {
-      console.warn("Quirra: could not read server response text", e);
-      return { __raw_text: null, __status: res.status, __ok: res.ok };
-    }
+  } catch (e) {
+    try { return { _rawText: await res.text(), _status: res.status, _ok: res.ok }; } catch { return null; }
   }
 }
 
 async function hashUserServerSide(userId) {
   const { backend, secret } = await getSettings();
-  const url = `${backend.replace(/\/+$/, "")}/v1/hash`;
+  const url = `${backend}/api/v1/hash`;
+  console.debug("Quirra: calling hash endpoint", url, { userId });
   const r = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json", ...(secret ? { "X-Quirra-Secret": secret } : {}) },
-    body: JSON.stringify({ user_id: userId }),
+    body: JSON.stringify({ user_id: userId })
   });
   const j = await safeJson(r);
+  console.debug("Quirra: hash response", r.status, j);
   if (!r.ok) {
-    const msg = (j && (j.detail || j.__raw_text)) || `Hash failed (${r.status})`;
-    throw new Error(String(msg).slice(0, 1000));
+    const msg = j?.detail || j?._rawText || `Hash failed: ${r.status}`;
+    throw new Error(msg);
   }
+  if (!j || !j.user_hash) throw new Error("Hash returned unexpected payload");
   return j.user_hash;
 }
 
 async function postEvent(payload) {
   const { backend, secret } = await getSettings();
-  const url = `${backend.replace(/\/+$/, "")}/v1/events`;
+  const url = `${backend}/api/v1/events`;
+  console.debug("Quirra: postEvent ->", url, payload);
   const r = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json", ...(secret ? { "X-Quirra-Secret": secret } : {}) },
-    body: JSON.stringify(payload),
+    body: JSON.stringify(payload)
   });
   const j = await safeJson(r);
-  if (!r.ok) {
-    const msg = (j && (j.detail || j.__raw_text)) || `Post failed (${r.status})`;
-    throw new Error(String(msg).slice(0, 1000));
-  }
-  return j.event_id;
+  console.debug("Quirra: postEvent response", r.status, j);
+  if (!r.ok) throw new Error(j?.detail || j?._rawText || `Post failed: ${r.status}`);
+  return j.event_id || j.id || j.event || null;
 }
 
 async function getAnalysis(eventId) {
   const { backend, secret } = await getSettings();
-  const url = `${backend.replace(/\/+$/, "")}/v1/events/${encodeURIComponent(eventId)}/analysis`;
+  const url = `${backend}/api/v1/events/${encodeURIComponent(eventId)}/analysis`;
+  console.debug("Quirra: getAnalysis ->", url);
   const r = await fetch(url, {
-    headers: { ...(secret ? { "X-Quirra-Secret": secret } : {}) },
+    headers: { ...(secret ? { "X-Quirra-Secret": secret } : {}) }
   });
   const j = await safeJson(r);
-  if (!r.ok) {
-    const msg = (j && (j.detail || j.__raw_text)) || `Analysis failed (${r.status})`;
-    throw new Error(String(msg).slice(0, 1000));
-  }
+  console.debug("Quirra: getAnalysis response", r.status, j);
+  if (!r.ok) throw new Error(j?.detail || j?._rawText || `Analysis failed: ${r.status}`);
   return j;
 }
 
@@ -117,16 +109,13 @@ class QuirraOverlay {
     this.root.className = "quirra-overlay";
     this.root.setAttribute("aria-live", "polite");
 
-    // main card
     this.content = document.createElement("div");
     this.content.className = "quirra-card";
 
-    // header with drag handle and close button
     this.header = document.createElement("div");
     this.header.className = "qr-header";
     this.header.innerHTML = `<span class="qr-handle" title="Drag">Quirra</span><button class="qr-close" title="Close">✕</button>`;
 
-    // content area
     this.body = document.createElement("div");
     this.body.className = "qr-body";
     this.body.innerHTML = `<div class="qr-row"><span class="qr-dot"></span><span>Ready</span></div>`;
@@ -139,19 +128,13 @@ class QuirraOverlay {
     this.dragging = false;
     this.offset = { x: 0, y: 0 };
 
-    // bind handlers AFTER nodes exist
     this._bindHandlers();
   }
 
   _bindHandlers() {
-    // close button
     const closeBtn = this.header.querySelector(".qr-close");
-    closeBtn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      this.hideTemporarily();
-    });
+    closeBtn.addEventListener("click", (e) => { e.stopPropagation(); this.hideTemporarily(); });
 
-    // drag support (pointer events)
     const handle = this.header.querySelector(".qr-handle");
     handle.style.cursor = "grab";
 
@@ -167,7 +150,7 @@ class QuirraOverlay {
 
     window.addEventListener("pointermove", (ev) => {
       if (!this.dragging) return;
-      this.mount(); // ensure mounted
+      this.mount();
       const x = Math.max(8, Math.min(window.innerWidth - this.content.offsetWidth - 8, ev.clientX - this.offset.x));
       const y = Math.max(8, Math.min(window.innerHeight - this.content.offsetHeight - 8, ev.clientY - this.offset.y));
       this.root.style.right = "auto";
@@ -184,13 +167,8 @@ class QuirraOverlay {
       }
     });
 
-    // show close button on hover (reveal controls)
-    this.content.addEventListener("mouseenter", () => {
-      this.content.classList.add("qr-hover");
-    });
-    this.content.addEventListener("mouseleave", () => {
-      this.content.classList.remove("qr-hover");
-    });
+    this.content.addEventListener("mouseenter", () => this.content.classList.add("qr-hover"));
+    this.content.addEventListener("mouseleave", () => this.content.classList.remove("qr-hover"));
   }
 
   mount() {
@@ -199,7 +177,6 @@ class QuirraOverlay {
     document.body.appendChild(this.root);
     this.mounted = true;
 
-    // default placement bottom-right
     this.root.style.right = "18px";
     this.root.style.bottom = "18px";
     this.root.style.left = "auto";
@@ -212,9 +189,7 @@ class QuirraOverlay {
   }
 
   hideTemporarily() {
-    // simple close behavior: remove for this page load. Re-appearance will be triggered by detection logic if needed.
     this.destroy();
-    // If you want to re-show after some time, you can schedule setTimeout(() => { /* mount again */ }, ms)
   }
 
   showAnalyzing(label) {
@@ -238,12 +213,12 @@ class QuirraOverlay {
   showResults(scores, neighbors) {
     this.mount();
     const riskCls = scores.risk >= 75 ? "qr-red" : scores.risk >= 45 ? "qr-amber" : "qr-green";
-    const list = (neighbors || []).slice(0, 5).map(n => {
-      const sim = n.similarity != null ? ` · sim ${(n.similarity * 100).toFixed(0)}%` : "";
+    const list = (neighbors || []).slice(0,5).map(n => {
+      const sim = n.similarity != null ? ` · sim ${(n.similarity*100).toFixed(0)}%` : "";
       const ctx = n.context ? ` · ${escapeHtml(n.context)}` : "";
       const when = n.when ? ` · ${escapeHtml(timeAgo(n.when))}` : "";
       const ref = n.url ? ` · <a href="${escapeAttr(n.url)}" target="_blank" rel="noopener noreferrer">ref</a>` : "";
-      return `<li>• ${escapeHtml(String(n.event_id || "").slice(0, 8))}${ctx}${when}${sim}${ref}</li>`;
+      return `<li>• ${escapeHtml(String(n.event_id||"").slice(0,8))}${ctx}${when}${sim}${ref}</li>`;
     }).join("");
     this.body.innerHTML = `
       <div class="qr-metrics">Risk: <b class="${riskCls}">${scores.risk}%</b>
@@ -276,13 +251,12 @@ class QuirraOverlay {
 
       .quirra-card { min-width: 260px; max-width: min(420px, 92vw); border-radius: 12px;
         border: 1px solid rgba(255,255,255,0.08);
-        background: rgba(18,18,24,0.18); /* more transparent so underlying content is visible */
+        background: rgba(18,18,24,0.18);
         -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
         color: #fff; padding: 6px; font: 13px/1.35 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
         box-shadow: 0 8px 28px rgba(0,0,0,0.28); pointer-events: auto;
       }
 
-      /* header */
       .qr-header { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:6px; border-radius:8px; }
       .qr-handle { font-weight:600; user-select:none; padding:2px 6px; border-radius:6px; background:transparent; cursor:grab; }
       .qr-close { display:none; background:transparent; border:0; color:rgba(255,255,255,0.8); font-size:14px; cursor:pointer; padding:4px; border-radius:6px; }
@@ -303,7 +277,6 @@ class QuirraOverlay {
       .qr-green{color:#34d399}.qr-amber{color:#f59e0b}.qr-red{color:#f87171}
       .quirra-card a{ color:#a5b4fc; text-decoration:underline; }
 
-      /* small responsive */
       @media (max-width:520px) {
         .quirra-card { left:8px; right:8px; bottom:12px; max-width:calc(100% - 16px); }
       }
@@ -315,13 +288,8 @@ class QuirraOverlay {
   }
 }
 
-// escape helpers
-function escapeHtml(s) {
-  return String(s || "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-}
-function escapeAttr(s) {
-  return escapeHtml(s);
-}
+function escapeHtml(s) { return String(s || "").replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;", '"':"&quot;" }[c])); }
+function escapeAttr(s) { return escapeHtml(s); }
 
 // ====== main watchers & logic ======
 (function main() {
@@ -329,19 +297,14 @@ function escapeAttr(s) {
 
   const overlay = new QuirraOverlay();
 
-  // quick detection: look for prompt-like elements or AI response elements
   const PROMPT_SELECTOR = ['textarea', '[contenteditable="true"]', 'div[role="textbox"]'].join(",");
   const RESPONSE_SELECTORS = ['[data-testid="ai-response"]', '.assistant-message', '.response', '.ai-output'];
 
-  // Immediately show overlay when an AI UI is present
   async function immediateDetectAndMount() {
     const hasPrompt = !!document.querySelector(PROMPT_SELECTOR);
     const hasResponse = !!document.querySelector(RESPONSE_SELECTORS.join(","));
     if (hasPrompt || hasResponse) {
       overlay.mount();
-
-      // Only show "backend not configured" if the user has not set a backend in storage
-      // (do not show if DEFAULT_BACKEND is present)
       chrome.storage.sync.get({ backend: "" }, (v) => {
         if (!v.backend && (!DEFAULT_BACKEND || DEFAULT_BACKEND.trim() === "")) {
           overlay.showBackendNotConfigured();
@@ -349,11 +312,8 @@ function escapeAttr(s) {
       });
     }
   }
-
-  // call once on load
   immediateDetectAndMount();
 
-  // rapid detection for new AI UI insertion
   const presenceObserver = new MutationObserver((mutations) => {
     for (const m of mutations) {
       if (m.addedNodes && m.addedNodes.length) {
@@ -366,10 +326,10 @@ function escapeAttr(s) {
   });
   presenceObserver.observe(document.documentElement, { childList: true, subtree: true });
 
-  // ----- PROMPT listening: near-immediate analysis while typing -----
+  // prompt analysis
   let promptTimer = null;
   let lastPromptHash = "";
-  const TYPING_DEBOUNCE = 220; // small so analysis happens quickly while typing
+  const TYPING_DEBOUNCE = 220;
 
   function scheduleAnalyzePrompt(text) {
     if (!text || text.trim().length < 16) return;
@@ -377,26 +337,18 @@ function escapeAttr(s) {
     promptTimer = setTimeout(() => void analyzePrompt(text), TYPING_DEBOUNCE);
   }
 
-  // listen to input events on prompt-like elements and keyup for immediate results
   document.addEventListener("input", (e) => {
-    const t = e.target;
-    if (!t || !t.matches?.(PROMPT_SELECTOR)) return;
-    const text = readText(t);
-    scheduleAnalyzePrompt(text);
+    const t = e.target; if (!t || !t.matches?.(PROMPT_SELECTOR)) return; scheduleAnalyzePrompt(readText(t));
   }, { capture: true });
 
-  // also listen keyup (faster feedback on many editors)
   document.addEventListener("keyup", (e) => {
-    const t = e.target;
-    if (!t || !t.matches?.(PROMPT_SELECTOR)) return;
-    const text = readText(t);
-    scheduleAnalyzePrompt(text);
+    const t = e.target; if (!t || !t.matches?.(PROMPT_SELECTOR)) return; scheduleAnalyzePrompt(readText(t));
   }, { capture: true });
 
   async function analyzePrompt(text) {
     try {
       overlay.showAnalyzing("Prompt");
-      const canon = text.replace(/\s+/g, " ").trim().toLowerCase();
+      const canon = text.replace(/\s+/g," ").trim().toLowerCase();
       const hash = simpleHash(canon);
       if (hash === lastPromptHash) return;
       lastPromptHash = hash;
@@ -413,18 +365,17 @@ function escapeAttr(s) {
       const suggestions = buildPromptSuggestions(text, scores);
       overlay.showPromptResults(scores, suggestions);
     } catch (err) {
-      console.warn("Quirra analyzePrompt error:", err);
+      console.debug("Quirra: analyzePrompt error", err);
       overlay.showError(err?.message || "Prompt analysis failed");
     }
   }
 
-  // ----- RESPONSE listening (watch DOM) - analyze immediately as responses appear -----
+  // response analysis
   let lastResponseSent = "";
   const mo = new MutationObserver(() => {
     const txt = getLatestResponse();
     if (txt && txt !== lastResponseSent) {
       lastResponseSent = txt;
-      // analyze immediately (no waiting)
       void analyzeResponse(txt);
     }
   });
@@ -440,11 +391,10 @@ function escapeAttr(s) {
         content: text,
         metadata: { user_hash, url: location.href, context: inferContext(text), public: isPublicUrl(location.href) }
       });
-      // poll for analysis
       const analysis = await waitForAnalysis(event_id, 8, 500);
-      overlay.showResults(analysis && analysis.scores ? analysis.scores : { risk: 0, duplication_pct: 0, style_pct: 0, seen_count: 0 }, analysis && analysis.neighbors ? analysis.neighbors : []);
+      overlay.showResults(analysis && analysis.scores ? analysis.scores : { risk:0, duplication_pct:0, style_pct:0, seen_count:0 }, analysis && analysis.neighbors ? analysis.neighbors : []);
     } catch (err) {
-      console.warn("Quirra analyzeResponse error:", err);
+      console.debug("Quirra: analyzeResponse error", err);
       overlay.showError(err?.message || "Response analysis failed");
     }
   }
@@ -452,56 +402,12 @@ function escapeAttr(s) {
   window.addEventListener("beforeunload", () => { mo.disconnect(); presenceObserver.disconnect(); overlay.destroy(); });
 
   // helpers
-  function readText(el) {
-    if (!el) return "";
-    if (typeof el.value === "string") return el.value;
-    return el.innerText || el.textContent || "";
-  }
-  function getLatestResponse() {
-    for (const sel of RESPONSE_SELECTORS) {
-      const nodes = Array.from(document.querySelectorAll(sel));
-      if (nodes.length) {
-        const last = nodes[nodes.length - 1];
-        const txt = (last.innerText || last.textContent || "");
-        if (txt.trim().length > 10) return txt.trim();
-      }
-    }
-    return "";
-  }
-  function simpleHash(s) { let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0; return String(h >>> 0); }
-  function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
-  async function waitForAnalysis(id, tries = 6, delayMs = 600) {
-    for (let i = 0; i < tries; i++) {
-      const r = await getAnalysis(id);
-      if (!r || !r.status || r.status === "done") return r;
-      await sleep(delayMs);
-    }
-    return await getAnalysis(id);
-  }
-  function buildPromptSuggestions(text, scores) {
-    const s = [];
-    const t = (text || "").trim();
-    if (t.length < 80) s.push("Add specifics: audience, domain, constraints, and examples.");
-    if (!/[?.!]/.test(t)) s.push("Ask as a clear question or add an objective.");
-    if (!/\bn\b|\bwords?\b|\bsteps?\b|\bformat\b|\bstyle\b/i.test(t)) s.push("Specify length, format, and writing style.");
-    if (/\bjailbreak|\bbypass|\bignore\b.*(rules|instructions)/i.test(t)) s.push("Remove jailbreak cues or policy-bypassing language.");
-    if ((scores?.style_pct || 0) > 70) s.push("Vary sentence structure and avoid boilerplate phrases.");
-    if (!s.length) s.push("Nice prompt. You can refine with target, style and constraints if needed.");
-    return s;
-  }
+  function readText(el) { if (!el) return ""; if (typeof el.value === "string") return el.value; return el.innerText || el.textContent || ""; }
+  function getLatestResponse() { for (const sel of RESPONSE_SELECTORS) { const nodes = Array.from(document.querySelectorAll(sel)); if (nodes.length) { const last = nodes[nodes.length-1]; const txt = (last.innerText || last.textContent || ""); if (txt.trim().length > 10) return txt.trim(); } } return ""; }
+  function simpleHash(s) { let h=0; for (let i=0;i<s.length;i++) h=(h*31+s.charCodeAt(i))|0; return String(h>>>0); }
+  function sleep(ms) { return new Promise(r=>setTimeout(r,ms)); }
+  async function waitForAnalysis(id, tries=6, delayMs=600) { for (let i=0;i<tries;i++){ const r = await getAnalysis(id); if (!r || !r.status || r.status === "done") return r; await sleep(delayMs); } return await getAnalysis(id); }
+  function buildPromptSuggestions(text, scores){ const s=[]; const t=(text||"").trim(); if (t.length<80) s.push("Add specifics: audience, domain, constraints, and examples."); if (!/[?.!]/.test(t)) s.push("Ask as a clear question or add an objective."); if (!/\bn\b|\bwords?\b|\bsteps?\b|\bformat\b|\bstyle\b/i.test(t)) s.push("Specify length, format, and writing style."); if (/\bjailbreak|\bbypass|\bignore\b.*(rules|instructions)/i.test(t)) s.push("Remove jailbreak cues or policy-bypassing language."); if ((scores?.style_pct||0) > 70) s.push("Vary sentence structure and avoid boilerplate phrases."); if (!s.length) s.push("Nice prompt. You can refine with target, style and constraints if needed."); return s; }
 })();
 
-// timeAgo helper
-function timeAgo(iso) {
-  if (!iso) return "";
-  const then = new Date(iso).getTime();
-  if (Number.isNaN(then)) return "";
-  const diff = Math.max(0, Date.now() - then);
-  const mins = Math.floor(diff / 60000);
-  if (mins < 1) return "just now";
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  const days = Math.floor(hrs / 24);
-  return `${days}d ago`;
-}
+function timeAgo(iso) { if(!iso) return ""; const then = new Date(iso).getTime(); if (Number.isNaN(then)) return ""; const diff = Math.max(0, Date.now() - then); const mins = Math.floor(diff/60000); if (mins<1) return "just now"; if (mins<60) return `${mins}m ago`; const hrs = Math.floor(mins/60); if (hrs<24) return `${hrs}h ago`; const days = Math.floor(hrs/24); return `${days}d ago`; }
