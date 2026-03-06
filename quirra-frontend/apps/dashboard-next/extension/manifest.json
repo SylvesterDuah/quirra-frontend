@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
-  "name": "Quirra Overlay",
-  "version": "0.1.0",
+  "name": "Quirra",
+  "version": "0.4.0",
   "description": "Know if your AI responses have been generated before.",
   "action": { "default_title": "Quirra" },
   "options_page": "options.html",

@@ -3,7 +3,7 @@ type Settings = { backend: string; secret?: string };
 
 async function getSettings(): Promise<Settings> {
   const v = await chrome.storage.sync.get({ backend: "", secret: "" });
-  return { backend: v.backend || "", secret: v.secret || "" };
+  return { backend: (v.backend || "").replace(/\/+$/, ""), secret: v.secret || "" };
 }
 
 export type Neighbor = {
@@ -15,7 +15,7 @@ export type Neighbor = {
 };
 
 export type AnalysisResponse = {
-  status?: "pending" | "done";
+  status?: "pending" | "done" | "unavailable";
   event_id: string;
   scores: {
     duplication_pct: number;
@@ -25,14 +25,19 @@ export type AnalysisResponse = {
     kind?: "prompt" | "response";
   };
   neighbors: Neighbor[];
+  labels?: string[];
   created_at?: string;
 };
+
+function authHeaders(secret?: string): Record<string, string> {
+  return secret ? { "X-Quirra-Secret": secret } : {};
+}
 
 export async function hashUserServerSide(userId: string): Promise<string> {
   const { backend, secret } = await getSettings();
   const r = await fetch(`${backend}/api/v1/hash`, {
     method: "POST",
-    headers: { "Content-Type": "application/json", ...(secret ? { "X-Quirra-Secret": secret } : {}) },
+    headers: { "Content-Type": "application/json", ...authHeaders(secret) },
     body: JSON.stringify({ user_id: userId }),
   });
   const j = await r.json();
@@ -49,7 +54,7 @@ export async function postEvent(payload: {
   const { backend, secret } = await getSettings();
   const r = await fetch(`${backend}/api/v1/events`, {
     method: "POST",
-    headers: { "Content-Type": "application/json", ...(secret ? { "X-Quirra-Secret": secret } : {}) },
+    headers: { "Content-Type": "application/json", ...authHeaders(secret) },
     body: JSON.stringify(payload),
   });
   const j = await r.json();
@@ -60,7 +65,7 @@ export async function postEvent(payload: {
 export async function getAnalysis(eventId: string): Promise<AnalysisResponse> {
   const { backend, secret } = await getSettings();
   const r = await fetch(`${backend}/api/v1/events/${eventId}/analysis`, {
-    headers: { ...(secret ? { "X-Quirra-Secret": secret } : {}) },
+    headers: authHeaders(secret),
   });
   const j = await r.json();
   if (!r.ok) throw new Error(j?.detail || "Analysis fetch failed");

@@ -1,4 +1,4 @@
-// quirra-frontend/apps/extensions/chrome-quirra-overlay/src/overlay.ts
+// extensions/chrome-quirra-overlay/src/overlay.ts
 
 export type Scores = {
   duplication_pct: number;
@@ -20,7 +20,6 @@ export class QuirraOverlay {
   private content: HTMLDivElement;
   private mounted = false;
 
-  // bound handlers so we can add/remove cleanly
   private onKeyDown = (e: KeyboardEvent) => {
     if (e.altKey) document.documentElement.classList.add("quirra-alt");
   };
@@ -35,7 +34,6 @@ export class QuirraOverlay {
 
     this.content = document.createElement("div");
     this.content.className = "quirra-card";
-
     this.root.appendChild(this.content);
   }
 
@@ -44,7 +42,6 @@ export class QuirraOverlay {
     this.injectStyles();
     document.body.appendChild(this.root);
     this.mounted = true;
-
     window.addEventListener("keydown", this.onKeyDown);
     window.addEventListener("keyup", this.onKeyUp);
     window.addEventListener("blur", this.onKeyUp);
@@ -60,7 +57,6 @@ export class QuirraOverlay {
     this.mounted = false;
   }
 
-  /** Generic analyzing state (response path) */
   showAnalyzing() {
     this.mount();
     this.content.innerHTML = `
@@ -70,7 +66,6 @@ export class QuirraOverlay {
     `;
   }
 
-  /** Error bubble */
   showError(msg = "Something went wrong") {
     this.mount();
     this.content.innerHTML = `
@@ -80,7 +75,6 @@ export class QuirraOverlay {
     `;
   }
 
-  /** NEW: analyzing state for prompt checks */
   showPromptAnalyzing() {
     this.mount();
     this.content.innerHTML = `
@@ -90,17 +84,14 @@ export class QuirraOverlay {
     `;
   }
 
-  /** NEW: prompt result bubble with suggestions */
   showPromptResults(scores: Scores, suggestions: string[]) {
     this.mount();
     const riskCls =
       scores.risk >= 75 ? "qr-red" : scores.risk >= 45 ? "qr-amber" : "qr-green";
 
     const tips =
-      suggestions && suggestions.length
-        ? `<ul class="qr-list">${suggestions
-            .map((s) => `<li>${escapeHtml(s)}</li>`)
-            .join("")}</ul>`
+      suggestions?.length
+        ? `<ul class="qr-list">${suggestions.map((s) => `<li>${escapeHtml(s)}</li>`).join("")}</ul>`
         : `<div class="qr-sub">No suggestions — looks good</div>`;
 
     this.content.innerHTML = `
@@ -118,8 +109,7 @@ export class QuirraOverlay {
     `;
   }
 
-  /** Response results with neighbor list */
-  showResults(scores: Scores, neighbors: Neighbor[]) {
+  showResults(scores: Scores, neighbors: Neighbor[], labels?: string[]) {
     this.mount();
     const riskCls =
       scores.risk >= 75 ? "qr-red" : scores.risk >= 45 ? "qr-amber" : "qr-green";
@@ -127,16 +117,26 @@ export class QuirraOverlay {
     const list = neighbors
       .slice(0, 5)
       .map((n) => {
-        const sim =
-          n.similarity != null ? ` · sim ${(n.similarity * 100).toFixed(0)}%` : "";
+        const sim = n.similarity != null ? ` · sim ${(n.similarity * 100).toFixed(0)}%` : "";
         const ctx = n.context ? ` · ${escapeHtml(n.context)}` : "";
         const when = n.when ? ` · ${escapeHtml(timeAgo(n.when))}` : "";
         const ref = n.url
-          ? ` · <a href="${escapeAttr(
-              n.url
-            )}" target="_blank" rel="noopener noreferrer">ref</a>`
+          ? ` · <a href="${escapeAttr(n.url)}" target="_blank" rel="noopener noreferrer">ref</a>`
           : "";
         return `<li>• ${escapeHtml(n.event_id.slice(0, 8))}${ctx}${when}${sim}${ref}</li>`;
+      })
+      .join("");
+
+    const labelChips = (labels ?? [])
+      .map((l) => {
+        const cls = l.startsWith("risk:high")
+          ? "qr-chip-red"
+          : l.startsWith("risk:")
+          ? "qr-chip-amber"
+          : l.startsWith("duplicate:")
+          ? "qr-chip-violet"
+          : "qr-chip-default";
+        return `<span class="qr-chip ${cls}">${escapeHtml(l)}</span>`;
       })
       .join("");
 
@@ -147,6 +147,7 @@ export class QuirraOverlay {
           <span class="qr-sub"> · dup ${scores.duplication_pct}% · style ${scores.style_pct}% · seen ${scores.seen_count}</span>
         </div>
       </div>
+      ${labelChips ? `<div class="qr-chips">${labelChips}</div>` : ""}
       ${
         neighbors.length
           ? `<div class="qr-section"><div class="qr-title">Near matches</div><ul class="qr-list">${list}</ul></div>`
@@ -156,7 +157,6 @@ export class QuirraOverlay {
     `;
   }
 
-  /** Injects minimal glassmorphism styles once */
   private injectStyles() {
     if (document.getElementById("quirra-overlay-styles")) return;
     const css = `
@@ -182,6 +182,12 @@ export class QuirraOverlay {
       .qr-list { margin: 0; padding-left: 14px; color: rgba(255,255,255,.88); }
       .qr-green { color: #34d399; } .qr-amber { color: #f59e0b; } .qr-red { color: #f87171; }
       .quirra-card a { color: #a5b4fc; text-decoration: underline; }
+      .qr-chips { display: flex; flex-wrap: wrap; gap: 4px; margin: 4px 0 6px 0; }
+      .qr-chip { font-size: 11px; padding: 2px 7px; border-radius: 999px; border: 1px solid rgba(255,255,255,.15); }
+      .qr-chip-red     { background: rgba(248,113,113,.15); color: #fca5a5; border-color: rgba(248,113,113,.3); }
+      .qr-chip-amber   { background: rgba(245,158,11,.15);  color: #fcd34d; border-color: rgba(245,158,11,.3); }
+      .qr-chip-violet  { background: rgba(167,139,250,.15); color: #c4b5fd; border-color: rgba(167,139,250,.3); }
+      .qr-chip-default { background: rgba(255,255,255,.08); color: rgba(255,255,255,.8); }
     `;
     const el = document.createElement("style");
     el.id = "quirra-overlay-styles";
@@ -190,13 +196,11 @@ export class QuirraOverlay {
   }
 }
 
-/* ---------- helpers ---------- */
-
 function escapeHtml(s: string) {
   return (s || "").replace(
     /[&<>"]/g,
-    (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]!
-  ));
+    (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]!)
+  );
 }
 function escapeAttr(s: string) {
   return escapeHtml(s);
@@ -206,11 +210,10 @@ function timeAgo(iso?: string) {
   const then = new Date(iso).getTime();
   if (Number.isNaN(then)) return "";
   const diff = Math.max(0, Date.now() - then);
-  const mins = Math.floor(diff / 60000);
+  const mins = Math.floor(diff / 60_000);
   if (mins < 1) return "just now";
   if (mins < 60) return `${mins}m ago`;
   const hrs = Math.floor(mins / 60);
   if (hrs < 24) return `${hrs}h ago`;
-  const days = Math.floor(hrs / 24);
-  return `${days}d ago`;
+  return `${Math.floor(hrs / 24)}d ago`;
 }

@@ -2,8 +2,8 @@
   "manifest_version": 3,
   "name": "Quirra",
   "short_name": "Quirra",
-  "version": "0.1.0",
-  "description": "Non-blocking overlay that provides prompt/response analysis and suggestions.",
+  "version": "0.4.0",
+  "description": "Know if your AI responses have been generated before.",
   "permissions": [
     "storage"
   ],
@@ -19,6 +19,6 @@
   ],
   "options_page": "options.html",
   "action": {
-    "default_title": "Quirra Overlay"
+    "default_title": "Quirra"
   }
 }
