@@ -1,83 +1,73 @@
-// quirra-frontend/apps/extensions/chrome-quirra-overlay/src/overlay.ts
-export class QuirraOverlay {
+"use strict";
+(() => {
+  // src/overlay.ts
+  var QuirraOverlay = class {
     constructor() {
-        this.mounted = false;
-        // bound handlers so we can add/remove cleanly
-        this.onKeyDown = (e) => {
-            if (e.altKey)
-                document.documentElement.classList.add("quirra-alt");
-        };
-        this.onKeyUp = () => {
-            document.documentElement.classList.remove("quirra-alt");
-        };
-        this.root = document.createElement("div");
-        this.root.className = "quirra-overlay";
-        this.root.setAttribute("aria-live", "polite");
-        this.content = document.createElement("div");
-        this.content.className = "quirra-card";
-        this.root.appendChild(this.content);
+      this.mounted = false;
+      this.onKeyDown = (e) => {
+        if (e.altKey) document.documentElement.classList.add("quirra-alt");
+      };
+      this.onKeyUp = () => {
+        document.documentElement.classList.remove("quirra-alt");
+      };
+      this.root = document.createElement("div");
+      this.root.className = "quirra-overlay";
+      this.root.setAttribute("aria-live", "polite");
+      this.content = document.createElement("div");
+      this.content.className = "quirra-card";
+      this.root.appendChild(this.content);
     }
     mount() {
-        if (this.mounted)
-            return;
-        this.injectStyles();
-        document.body.appendChild(this.root);
-        this.mounted = true;
-        window.addEventListener("keydown", this.onKeyDown);
-        window.addEventListener("keyup", this.onKeyUp);
-        window.addEventListener("blur", this.onKeyUp);
+      if (this.mounted) return;
+      this.injectStyles();
+      document.body.appendChild(this.root);
+      this.mounted = true;
+      window.addEventListener("keydown", this.onKeyDown);
+      window.addEventListener("keyup", this.onKeyUp);
+      window.addEventListener("blur", this.onKeyUp);
     }
     destroy() {
-        if (!this.mounted)
-            return;
-        this.root.remove();
-        document.documentElement.classList.remove("quirra-alt");
-        window.removeEventListener("keydown", this.onKeyDown);
-        window.removeEventListener("keyup", this.onKeyUp);
-        window.removeEventListener("blur", this.onKeyUp);
-        this.mounted = false;
+      if (!this.mounted) return;
+      this.root.remove();
+      document.documentElement.classList.remove("quirra-alt");
+      window.removeEventListener("keydown", this.onKeyDown);
+      window.removeEventListener("keyup", this.onKeyUp);
+      window.removeEventListener("blur", this.onKeyUp);
+      this.mounted = false;
     }
-    /** Generic analyzing state (response path) */
     showAnalyzing() {
-        this.mount();
-        this.content.innerHTML = `
+      this.mount();
+      this.content.innerHTML = `
       <div class="qr-head">Quirra</div>
-      <div class="qr-row"><span class="qr-dot"></span><span>Analyzing…</span></div>
+      <div class="qr-row"><span class="qr-dot"></span><span>Analyzing\u2026</span></div>
       <div class="qr-hint">Hold <b>Alt</b> to interact</div>
     `;
     }
-    /** Error bubble */
     showError(msg = "Something went wrong") {
-        this.mount();
-        this.content.innerHTML = `
+      this.mount();
+      this.content.innerHTML = `
       <div class="qr-head">Quirra</div>
       <div class="qr-err">${escapeHtml(msg)}</div>
       <div class="qr-hint">Hold <b>Alt</b> to interact</div>
     `;
     }
-    /** NEW: analyzing state for prompt checks */
     showPromptAnalyzing() {
-        this.mount();
-        this.content.innerHTML = `
+      this.mount();
+      this.content.innerHTML = `
       <div class="qr-head">Quirra</div>
-      <div class="qr-row"><span class="qr-dot"></span><span>Analyzing prompt…</span></div>
+      <div class="qr-row"><span class="qr-dot"></span><span>Analyzing prompt\u2026</span></div>
       <div class="qr-hint">Hold <b>Alt</b> to interact</div>
     `;
     }
-    /** NEW: prompt result bubble with suggestions */
     showPromptResults(scores, suggestions) {
-        this.mount();
-        const riskCls = scores.risk >= 75 ? "qr-red" : scores.risk >= 45 ? "qr-amber" : "qr-green";
-        const tips = suggestions && suggestions.length
-            ? `<ul class="qr-list">${suggestions
-                .map((s) => `<li>${escapeHtml(s)}</li>`)
-                .join("")}</ul>`
-            : `<div class="qr-sub">No suggestions — looks good</div>`;
-        this.content.innerHTML = `
+      this.mount();
+      const riskCls = scores.risk >= 75 ? "qr-red" : scores.risk >= 45 ? "qr-amber" : "qr-green";
+      const tips = suggestions?.length ? `<ul class="qr-list">${suggestions.map((s) => `<li>${escapeHtml(s)}</li>`).join("")}</ul>` : `<div class="qr-sub">No suggestions \u2014 looks good</div>`;
+      this.content.innerHTML = `
       <div class="qr-head">Quirra</div>
       <div class="qr-metrics">
         <div>Prompt risk: <b class="${riskCls}">${scores.risk}%</b>
-          <span class="qr-sub"> · dup ${scores.duplication_pct}% · style ${scores.style_pct}%</span>
+          <span class="qr-sub"> \xB7 dup ${scores.duplication_pct}% \xB7 style ${scores.style_pct}%</span>
         </div>
       </div>
       <div class="qr-section">
@@ -87,40 +77,35 @@ export class QuirraOverlay {
       <div class="qr-hint">Hold <b>Alt</b> to interact</div>
     `;
     }
-    /** Response results with neighbor list */
-    showResults(scores, neighbors) {
-        this.mount();
-        const riskCls = scores.risk >= 75 ? "qr-red" : scores.risk >= 45 ? "qr-amber" : "qr-green";
-        const list = neighbors
-            .slice(0, 5)
-            .map((n) => {
-            const sim = n.similarity != null ? ` · sim ${(n.similarity * 100).toFixed(0)}%` : "";
-            const ctx = n.context ? ` · ${escapeHtml(n.context)}` : "";
-            const when = n.when ? ` · ${escapeHtml(timeAgo(n.when))}` : "";
-            const ref = n.url
-                ? ` · <a href="${escapeAttr(n.url)}" target="_blank" rel="noopener noreferrer">ref</a>`
-                : "";
-            return `<li>• ${escapeHtml(n.event_id.slice(0, 8))}${ctx}${when}${sim}${ref}</li>`;
-        })
-            .join("");
-        this.content.innerHTML = `
+    showResults(scores, neighbors, labels) {
+      this.mount();
+      const riskCls = scores.risk >= 75 ? "qr-red" : scores.risk >= 45 ? "qr-amber" : "qr-green";
+      const list = neighbors.slice(0, 5).map((n) => {
+        const sim = n.similarity != null ? ` \xB7 sim ${(n.similarity * 100).toFixed(0)}%` : "";
+        const ctx = n.context ? ` \xB7 ${escapeHtml(n.context)}` : "";
+        const when = n.when ? ` \xB7 ${escapeHtml(timeAgo(n.when))}` : "";
+        const ref = n.url ? ` \xB7 <a href="${escapeAttr(n.url)}" target="_blank" rel="noopener noreferrer">ref</a>` : "";
+        return `<li>\u2022 ${escapeHtml(n.event_id.slice(0, 8))}${ctx}${when}${sim}${ref}</li>`;
+      }).join("");
+      const labelChips = (labels ?? []).map((l) => {
+        const cls = l.startsWith("risk:high") ? "qr-chip-red" : l.startsWith("risk:") ? "qr-chip-amber" : l.startsWith("duplicate:") ? "qr-chip-violet" : "qr-chip-default";
+        return `<span class="qr-chip ${cls}">${escapeHtml(l)}</span>`;
+      }).join("");
+      this.content.innerHTML = `
       <div class="qr-head">Quirra</div>
       <div class="qr-metrics">
         <div>Risk: <b class="${riskCls}">${scores.risk}%</b>
-          <span class="qr-sub"> · dup ${scores.duplication_pct}% · style ${scores.style_pct}% · seen ${scores.seen_count}</span>
+          <span class="qr-sub"> \xB7 dup ${scores.duplication_pct}% \xB7 style ${scores.style_pct}% \xB7 seen ${scores.seen_count}</span>
         </div>
       </div>
-      ${neighbors.length
-            ? `<div class="qr-section"><div class="qr-title">Near matches</div><ul class="qr-list">${list}</ul></div>`
-            : `<div class="qr-section"><div class="qr-title">Near matches</div><div class="qr-sub">None found</div></div>`}
+      ${labelChips ? `<div class="qr-chips">${labelChips}</div>` : ""}
+      ${neighbors.length ? `<div class="qr-section"><div class="qr-title">Near matches</div><ul class="qr-list">${list}</ul></div>` : `<div class="qr-section"><div class="qr-title">Near matches</div><div class="qr-sub">None found</div></div>`}
       <div class="qr-hint">Hold <b>Alt</b> to interact</div>
     `;
     }
-    /** Injects minimal glassmorphism styles once */
     injectStyles() {
-        if (document.getElementById("quirra-overlay-styles"))
-            return;
-        const css = `
+      if (document.getElementById("quirra-overlay-styles")) return;
+      const css = `
       .quirra-overlay { position: fixed; right: 18px; bottom: 18px; z-index: 2147483646; pointer-events: none; }
       html.quirra-alt .quirra-overlay { pointer-events: auto; }
       .quirra-card {
@@ -143,35 +128,38 @@ export class QuirraOverlay {
       .qr-list { margin: 0; padding-left: 14px; color: rgba(255,255,255,.88); }
       .qr-green { color: #34d399; } .qr-amber { color: #f59e0b; } .qr-red { color: #f87171; }
       .quirra-card a { color: #a5b4fc; text-decoration: underline; }
+      .qr-chips { display: flex; flex-wrap: wrap; gap: 4px; margin: 4px 0 6px 0; }
+      .qr-chip { font-size: 11px; padding: 2px 7px; border-radius: 999px; border: 1px solid rgba(255,255,255,.15); }
+      .qr-chip-red     { background: rgba(248,113,113,.15); color: #fca5a5; border-color: rgba(248,113,113,.3); }
+      .qr-chip-amber   { background: rgba(245,158,11,.15);  color: #fcd34d; border-color: rgba(245,158,11,.3); }
+      .qr-chip-violet  { background: rgba(167,139,250,.15); color: #c4b5fd; border-color: rgba(167,139,250,.3); }
+      .qr-chip-default { background: rgba(255,255,255,.08); color: rgba(255,255,255,.8); }
     `;
-        const el = document.createElement("style");
-        el.id = "quirra-overlay-styles";
-        el.textContent = css;
-        document.head.appendChild(el);
+      const el = document.createElement("style");
+      el.id = "quirra-overlay-styles";
+      el.textContent = css;
+      document.head.appendChild(el);
     }
-}
-/* ---------- helpers ---------- */
-function escapeHtml(s) {
-    return (s || "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-}
-function escapeAttr(s) {
+  };
+  function escapeHtml(s) {
+    return (s || "").replace(
+      /[&<>"]/g,
+      (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]
+    );
+  }
+  function escapeAttr(s) {
     return escapeHtml(s);
-}
-function timeAgo(iso) {
-    if (!iso)
-        return "";
+  }
+  function timeAgo(iso) {
+    if (!iso) return "";
     const then = new Date(iso).getTime();
-    if (Number.isNaN(then))
-        return "";
+    if (Number.isNaN(then)) return "";
     const diff = Math.max(0, Date.now() - then);
-    const mins = Math.floor(diff / 60000);
-    if (mins < 1)
-        return "just now";
-    if (mins < 60)
-        return `${mins}m ago`;
+    const mins = Math.floor(diff / 6e4);
+    if (mins < 1) return "just now";
+    if (mins < 60) return `${mins}m ago`;
     const hrs = Math.floor(mins / 60);
-    if (hrs < 24)
-        return `${hrs}h ago`;
-    const days = Math.floor(hrs / 24);
-    return `${days}d ago`;
-}
+    if (hrs < 24) return `${hrs}h ago`;
+    return `${Math.floor(hrs / 24)}d ago`;
+  }
+})();

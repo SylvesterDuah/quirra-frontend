@@ -1,0 +1,29 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Quirra Options</title>
+    <style>
+      body{font:14px/1.4 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; padding:16px; color:#0f172a}
+      label{display:block; margin:10px 0 4px; color:#334155}
+      input{width:420px; max-width:100%; padding:8px; border:1px solid #cbd5e1; border-radius:8px}
+      button{margin-top:12px; padding:8px 12px; background:#4f46e5; color:#fff; border:0; border-radius:8px; cursor:pointer}
+      .row{margin-top:8px; color:#475569}
+      .hint{font-size:12px; color:#64748b}
+    </style>
+  </head>
+  <body>
+    <h2>Quirra Extension Settings</h2>
+    <div class="row">
+      <label for="backend">Backend base URL</label>
+      <input id="backend" placeholder="http://127.0.0.1:8000" />
+      <div class="hint">Example: <code>http://127.0.0.1:8000</code> (no trailing slash)</div>
+    </div>
+    <div class="row">
+      <label for="secret">X-Quirra-Secret (optional)</label>
+      <input id="secret" placeholder="only if your backend requires it" />
+    </div>
+    <button id="save">Save</button>
+    <script src="options.js"></script>
+  </body>
+</html>

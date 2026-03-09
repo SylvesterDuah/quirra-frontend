@@ -31,7 +31,6 @@ export class QuirraOverlay {
     this.root = document.createElement("div");
     this.root.className = "quirra-overlay";
     this.root.setAttribute("aria-live", "polite");
-
     this.content = document.createElement("div");
     this.content.className = "quirra-card";
     this.root.appendChild(this.content);
@@ -75,6 +74,17 @@ export class QuirraOverlay {
     `;
   }
 
+  // Appends a small backend warning without wiping the local preview result
+  appendBackendError(msg: string) {
+    if (!this.mounted) return;
+    const existing = this.content.querySelector(".qr-backend-err");
+    if (existing) { existing.textContent = `⚠ ${msg}`; return; }
+    const el = document.createElement("div");
+    el.className = "qr-backend-err";
+    el.textContent = `⚠ ${msg}`;
+    this.content.appendChild(el);
+  }
+
   showPromptAnalyzing() {
     this.mount();
     this.content.innerHTML = `
@@ -84,21 +94,23 @@ export class QuirraOverlay {
     `;
   }
 
-  showPromptResults(scores: Scores, suggestions: string[]) {
+  // isPreview = true means scores came from local instant scoring (no network)
+  showPromptResults(scores: Scores, suggestions: string[], isPreview = false) {
     this.mount();
-    const riskCls =
-      scores.risk >= 75 ? "qr-red" : scores.risk >= 45 ? "qr-amber" : "qr-green";
+    const riskCls = scores.risk >= 75 ? "qr-red" : scores.risk >= 45 ? "qr-amber" : "qr-green";
+    const previewBadge = isPreview
+      ? `<span class="qr-preview-badge">live preview</span>`
+      : "";
 
-    const tips =
-      suggestions?.length
-        ? `<ul class="qr-list">${suggestions.map((s) => `<li>${escapeHtml(s)}</li>`).join("")}</ul>`
-        : `<div class="qr-sub">No suggestions — looks good</div>`;
+    const tips = suggestions?.length
+      ? `<ul class="qr-list">${suggestions.map(s => `<li>${escapeHtml(s)}</li>`).join("")}</ul>`
+      : `<div class="qr-sub">No suggestions — looks good</div>`;
 
     this.content.innerHTML = `
-      <div class="qr-head">Quirra</div>
+      <div class="qr-head">Quirra ${previewBadge}</div>
       <div class="qr-metrics">
-        <div>Prompt risk: <b class="${riskCls}">${scores.risk}%</b>
-          <span class="qr-sub"> · dup ${scores.duplication_pct}% · style ${scores.style_pct}%</span>
+        <div>Risk: <b class="${riskCls}">${scores.risk}%</b>
+          <span class="qr-sub"> · style ${scores.style_pct}%</span>
         </div>
       </div>
       <div class="qr-section">
@@ -109,14 +121,17 @@ export class QuirraOverlay {
     `;
   }
 
-  showResults(scores: Scores, neighbors: Neighbor[], labels?: string[]) {
+  // isPreview = true means scores are local instant, backend refining in background
+  showResults(scores: Scores, neighbors: Neighbor[], labels: string[], isPreview = false) {
     this.mount();
-    const riskCls =
-      scores.risk >= 75 ? "qr-red" : scores.risk >= 45 ? "qr-amber" : "qr-green";
+    const riskCls = scores.risk >= 75 ? "qr-red" : scores.risk >= 45 ? "qr-amber" : "qr-green";
+    const previewBadge = isPreview
+      ? `<span class="qr-preview-badge">live · refining…</span>`
+      : "";
 
     const list = neighbors
       .slice(0, 5)
-      .map((n) => {
+      .map(n => {
         const sim = n.similarity != null ? ` · sim ${(n.similarity * 100).toFixed(0)}%` : "";
         const ctx = n.context ? ` · ${escapeHtml(n.context)}` : "";
         const when = n.when ? ` · ${escapeHtml(timeAgo(n.when))}` : "";
@@ -128,7 +143,7 @@ export class QuirraOverlay {
       .join("");
 
     const labelChips = (labels ?? [])
-      .map((l) => {
+      .map(l => {
         const cls = l.startsWith("risk:high")
           ? "qr-chip-red"
           : l.startsWith("risk:")
@@ -141,7 +156,7 @@ export class QuirraOverlay {
       .join("");
 
     this.content.innerHTML = `
-      <div class="qr-head">Quirra</div>
+      <div class="qr-head">Quirra ${previewBadge}</div>
       <div class="qr-metrics">
         <div>Risk: <b class="${riskCls}">${scores.risk}%</b>
           <span class="qr-sub"> · dup ${scores.duplication_pct}% · style ${scores.style_pct}% · seen ${scores.seen_count}</span>
@@ -151,6 +166,8 @@ export class QuirraOverlay {
       ${
         neighbors.length
           ? `<div class="qr-section"><div class="qr-title">Near matches</div><ul class="qr-list">${list}</ul></div>`
+          : isPreview
+          ? `<div class="qr-section qr-sub">Checking for matches…</div>`
           : `<div class="qr-section"><div class="qr-title">Near matches</div><div class="qr-sub">None found</div></div>`
       }
       <div class="qr-hint">Hold <b>Alt</b> to interact</div>
@@ -164,30 +181,39 @@ export class QuirraOverlay {
       html.quirra-alt .quirra-overlay { pointer-events: auto; }
       .quirra-card {
         min-width: 280px; max-width: min(380px, 92vw); border-radius: 14px;
-        border: 1px solid rgba(255,255,255,0.18); background: rgba(18,18,24,0.45);
-        -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
-        color: #fff; padding: 10px 12px; font: 13px/1.45 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-        box-shadow: 0 10px 28px rgba(0,0,0,.35);
+        border: 1px solid rgba(255,255,255,0.18); background: rgba(18,18,24,0.55);
+        -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px);
+        color: #fff; padding: 10px 12px;
+        font: 13px/1.45 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+        box-shadow: 0 10px 28px rgba(0,0,0,.4);
+        transition: opacity 0.15s ease;
       }
-      .qr-head { font-weight: 650; margin-bottom: 6px; font-size: 13px; letter-spacing: .2px; }
+      .qr-head { font-weight: 650; margin-bottom: 6px; font-size: 13px; letter-spacing: .2px;
+                 display: flex; align-items: center; gap: 6px; }
+      .qr-preview-badge { font-size: 10px; font-weight: 500; padding: 1px 6px; border-radius: 999px;
+                          background: rgba(99,102,241,.25); color: #a5b4fc; border: 1px solid rgba(99,102,241,.3); }
       .qr-row { display: flex; align-items: center; gap: 8px; color: rgba(255,255,255,.85); }
-      .qr-dot { width: 8px; height: 8px; border-radius: 50%; background: rgba(255,255,255,.9); animation: qrPulse 1s infinite alternate; }
+      .qr-dot { width: 8px; height: 8px; border-radius: 50%; background: rgba(255,255,255,.9);
+                animation: qrPulse 1s infinite alternate; flex-shrink: 0; }
       @keyframes qrPulse { from { opacity: .25; } to { opacity: .9; } }
-      .qr-hint { margin-top: 6px; font-size: 11px; color: rgba(255,255,255,.6); }
-      .qr-err { color: #ffd166; }
-      .qr-metrics { margin: 2px 0 6px 0; }
-      .qr-sub { color: rgba(255,255,255,.6); }
-      .qr-title { font-weight: 600; margin-bottom: 4px; }
+      .qr-hint { margin-top: 6px; font-size: 11px; color: rgba(255,255,255,.5); }
+      .qr-err  { color: #ffd166; font-size: 12px; }
+      .qr-backend-err { margin-top: 6px; font-size: 11px; color: #f59e0b;
+                        border-top: 1px solid rgba(255,255,255,.1); padding-top: 5px; }
+      .qr-metrics { margin: 2px 0 6px; }
+      .qr-sub { color: rgba(255,255,255,.55); }
+      .qr-title { font-weight: 600; margin-bottom: 4px; font-size: 12px; }
       .qr-section { margin-top: 6px; }
-      .qr-list { margin: 0; padding-left: 14px; color: rgba(255,255,255,.88); }
+      .qr-list { margin: 0; padding-left: 14px; color: rgba(255,255,255,.88); font-size: 12px; }
+      .qr-list li { margin-bottom: 2px; }
       .qr-green { color: #34d399; } .qr-amber { color: #f59e0b; } .qr-red { color: #f87171; }
       .quirra-card a { color: #a5b4fc; text-decoration: underline; }
-      .qr-chips { display: flex; flex-wrap: wrap; gap: 4px; margin: 4px 0 6px 0; }
-      .qr-chip { font-size: 11px; padding: 2px 7px; border-radius: 999px; border: 1px solid rgba(255,255,255,.15); }
+      .qr-chips { display: flex; flex-wrap: wrap; gap: 4px; margin: 4px 0 6px; }
+      .qr-chip { font-size: 10px; padding: 2px 7px; border-radius: 999px; border: 1px solid rgba(255,255,255,.15); }
       .qr-chip-red     { background: rgba(248,113,113,.15); color: #fca5a5; border-color: rgba(248,113,113,.3); }
       .qr-chip-amber   { background: rgba(245,158,11,.15);  color: #fcd34d; border-color: rgba(245,158,11,.3); }
       .qr-chip-violet  { background: rgba(167,139,250,.15); color: #c4b5fd; border-color: rgba(167,139,250,.3); }
-      .qr-chip-default { background: rgba(255,255,255,.08); color: rgba(255,255,255,.8); }
+      .qr-chip-default { background: rgba(255,255,255,.08); color: rgba(255,255,255,.75); }
     `;
     const el = document.createElement("style");
     el.id = "quirra-overlay-styles";
@@ -197,19 +223,14 @@ export class QuirraOverlay {
 }
 
 function escapeHtml(s: string) {
-  return (s || "").replace(
-    /[&<>"]/g,
-    (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]!)
+  return (s || "").replace(/[&<>"]/g, c =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]!)
   );
 }
-function escapeAttr(s: string) {
-  return escapeHtml(s);
-}
+function escapeAttr(s: string) { return escapeHtml(s); }
 function timeAgo(iso?: string) {
   if (!iso) return "";
-  const then = new Date(iso).getTime();
-  if (Number.isNaN(then)) return "";
-  const diff = Math.max(0, Date.now() - then);
+  const diff = Math.max(0, Date.now() - new Date(iso).getTime());
   const mins = Math.floor(diff / 60_000);
   if (mins < 1) return "just now";
   if (mins < 60) return `${mins}m ago`;

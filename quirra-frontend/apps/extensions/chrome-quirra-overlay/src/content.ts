@@ -1,9 +1,11 @@
 // extensions/chrome-quirra-overlay/src/content.ts
-import { postEvent, getAnalysis, hashUserServerSide } from "./lib/api";
-import { getStableBrowserId } from "./lib/identity";
+
+
+import { postEvent, getAnalysis, getCachedUserHash } from "./lib/api";
 import { inferContext, isPublicUrl } from "./lib/context";
 import { QuirraOverlay, type Scores } from "./overlay";
 
+// Only activate on known AI sites
 const AI_HOSTNAMES = new Set([
   "chat.openai.com",
   "chatgpt.com",
@@ -19,8 +21,6 @@ const AI_HOSTNAMES = new Set([
   "mistral.ai",
   "chat.mistral.ai",
   "huggingface.co",
-  "replicate.com",
-  "cluely.com",
 ]);
 
 const hostname = location.hostname.replace(/^www\./, "");
@@ -31,12 +31,45 @@ if (isAiSite && !isLocalhost) {
   init();
 }
 
+// ---------------------------------------------------------------------------
+// Local instant scoring — runs entirely in the content script, zero latency
+// ---------------------------------------------------------------------------
+
+const POLICY_WORDS = [
+  "bypass", "jailbreak", "exploit", "phishing", "malware", "weapon",
+  "bomb", "poison", "harm", "kill", "deepfake", "hack", "crack",
+  "dox", "leak", "pii", "password", "stereotype", "racist", "sexist",
+];
+const LM_TELLS = ["as an ai", "as a language model", "cannot assist"];
+
+function localScore(text: string): Scores {
+  const t = (text || "").toLowerCase();
+  const words = t.match(/[a-z0-9']+/g) || [];
+
+  // Type-token ratio → style sameness
+  const ttr = words.length > 0 ? new Set(words).size / words.length : 1;
+  const style_pct = Math.round(Math.max(0, Math.min(100, (1 - ttr) * 100)));
+
+  // Policy hits → risk
+  const hits = POLICY_WORDS.filter(w => t.includes(w)).length;
+  const jailbreak = /ignore previous instructions|bypass|jailbreak/.test(t) ? 1 : 0;
+  const lm_tell = LM_TELLS.some(p => t.includes(p)) ? 1 : 0;
+  const risk = Math.round(Math.min(100, hits * 10 + jailbreak * 25 + lm_tell * 10));
+
+  return { duplication_pct: 0, style_pct, risk, seen_count: 0 };
+}
+
+// ---------------------------------------------------------------------------
+// Main init
+// ---------------------------------------------------------------------------
+
 function init() {
   const overlay = new QuirraOverlay();
 
-  // ----------------------------------------------------------------
-  // Prompt path — debounced while typing
-  // ----------------------------------------------------------------
+
+  getCachedUserHash().catch(() => {});
+
+  // ---- Prompt path --------------------------------------------------------
   const PROMPT_SELECTOR = [
     "textarea",
     '[contenteditable="true"]',
@@ -53,58 +86,52 @@ function init() {
       if (!t?.matches?.(PROMPT_SELECTOR)) return;
       const text = readText(t);
       if (!text || text.trim().length < 24) return;
+
+      // FIX: Show LOCAL scores instantly while the user is still typing —
+      // zero network delay, gives immediate feedback on risk and style.
+      const instant = localScore(text);
+      const suggestions = buildPromptSuggestions(text, instant);
+      overlay.showPromptResults(instant, suggestions, true); // true = "local preview"
+
+      // Then debounce the backend call for a full server-side analysis
       if (promptTimer) clearTimeout(promptTimer);
-      promptTimer = setTimeout(() => void analyzePrompt(text), 700);
+      promptTimer = setTimeout(() => void analyzePromptRemote(text), 300);
     },
     { capture: true }
   );
 
-  async function analyzePrompt(text: string) {
+  async function analyzePromptRemote(text: string) {
     try {
-      // FIX: was using a 32-bit djb2 hash with collision risk.
-      // crypto.subtle gives a proper SHA-256 at zero extra cost.
       const hash = await sha256(text.replace(/\s+/g, " ").trim().toLowerCase());
       if (hash === lastPromptHash) return;
       lastPromptHash = hash;
 
-      overlay.showPromptAnalyzing();
-
-      const stableId = await getStableBrowserId();
-      const user_hash = await hashUserServerSide(stableId);
-
+      const user_hash = await getCachedUserHash();
       const { event_id } = await postEvent({
         kind: "prompt",
         content: text,
-        metadata: {
-          user_hash,
-          url: location.href,
-          context: inferContext(text),
-          public: false,
-        },
+        metadata: { user_hash, url: location.href, context: inferContext(text), public: false },
       });
 
-      // Prompts don't need duplicate-search polling — analysis is fast
       const ar = await getAnalysis(event_id);
-      overlay.showPromptResults(ar.scores as Scores, buildPromptSuggestions(text, ar.scores as Scores));
+
+      overlay.showPromptResults(ar.scores as Scores, buildPromptSuggestions(text, ar.scores as Scores), false);
     } catch (e) {
-      overlay.showError(e instanceof Error ? e.message : "Prompt analysis failed");
+
+      const msg = e instanceof Error ? e.message : String(e);
+      overlay.appendBackendError(msg);
     }
   }
 
-  // ----------------------------------------------------------------
-  // Response path — watch DOM for AI output containers only
-  // ----------------------------------------------------------------
+  // ---- Response path -------------------------------------------------------
   const RESPONSE_SELECTORS = [
     '[data-testid="ai-response"]',
     '[data-testid="conversation-turn-content"]',
+    '[data-message-author-role="assistant"]',
     ".assistant-message",
+    ".font-claude-message",
     ".response-content",
     ".ai-output",
-    // Claude.ai
-    '[data-is-streaming]',
-    ".font-claude-message",
-    // ChatGPT
-    '[data-message-author-role="assistant"]',
   ];
 
   function getLatestResponse(): string {
@@ -120,31 +147,27 @@ function init() {
   }
 
   let lastResponseSent = "";
-  // FIX: track in-flight response analysis so we don't fire concurrent requests
-  // when streaming responses mutate the DOM on every token.
   let responseInFlight = false;
-  // Debounce timer so we wait for streaming to settle before sending
   let responseTimer: ReturnType<typeof setTimeout> | null = null;
 
   function scheduleResponseAnalysis(text: string) {
+    const instant = localScore(text);
+    overlay.showResults(instant, [], [], true); // true = "local preview"
+
+    // Debounce the backend call — wait for streaming to settle
     if (responseTimer) clearTimeout(responseTimer);
-    // Wait 1.2s after the last DOM mutation — catches streaming completion
     responseTimer = setTimeout(() => {
       if (text !== lastResponseSent && !responseInFlight) {
         lastResponseSent = text;
-        void analyzeResponse(text);
+        void analyzeResponseRemote(text);
       }
-    }, 1200);
+    }, 800);
   }
 
-  async function analyzeResponse(text: string) {
+  async function analyzeResponseRemote(text: string) {
     responseInFlight = true;
     try {
-      overlay.showAnalyzing();
-
-      const stableId = await getStableBrowserId();
-      const user_hash = await hashUserServerSide(stableId);
-
+      const user_hash = await getCachedUserHash();
       const { event_id } = await postEvent({
         kind: "response",
         content: text,
@@ -156,49 +179,38 @@ function init() {
         },
       });
 
-      // FIX: replaced the 6-try × 600ms tight loop (always 7 requests, no
-      // backoff, no abort) with exponential backoff and an AbortController
-      // so navigating away cancels the pending poll.
       const analysis = await pollAnalysis(event_id);
-      overlay.showResults(analysis.scores as Scores, analysis.neighbors || [], analysis.labels);
+      overlay.showResults(
+        analysis.scores as Scores,
+        analysis.neighbors || [],
+        analysis.labels || [],
+        false
+      );
     } catch (e) {
-      if (e instanceof DOMException && e.name === "AbortError") return; // navigation
-      overlay.showError(e instanceof Error ? e.message : "Response analysis failed");
+      const msg = e instanceof Error ? e.message : String(e);
+      overlay.appendBackendError(msg);
     } finally {
       responseInFlight = false;
     }
   }
 
-  // FIX: was attaching to document.documentElement with { subtree: true },
-  // which fires on every DOM mutation across the entire page. Now we scope
-  // the observer to the most specific available container, falling back
-  // gracefully to document.body.
+  // Scope observer to chat container, not entire document
   function findObserveTarget(): Element {
-    // Try to find the main chat area to narrow scope
-    const candidates = [
-      'main[class*="chat"]',
-      '[id*="chat"]',
-      '[class*="conversation"]',
-      '[class*="messages"]',
-      "main",
-    ];
-    for (const sel of candidates) {
+    for (const sel of ["main", '[role="main"]', '[class*="chat"]', '[class*="conversation"]', '[id*="chat"]']) {
       const el = document.querySelector(sel);
       if (el) return el;
     }
     return document.body;
   }
 
-  const observeTarget = findObserveTarget();
   const mo = new MutationObserver(() => {
     const text = getLatestResponse();
     if (text) scheduleResponseAnalysis(text);
   });
 
-  mo.observe(observeTarget, {
+  mo.observe(findObserveTarget(), {
     childList: true,
     subtree: true,
-    // Don't watch attribute/character changes — only structural DOM additions
     attributes: false,
     characterData: false,
   });
@@ -206,12 +218,11 @@ function init() {
   window.addEventListener("beforeunload", () => {
     mo.disconnect();
     if (responseTimer) clearTimeout(responseTimer);
+    if (promptTimer) clearTimeout(promptTimer);
     overlay.destroy();
   });
 
-  // ----------------------------------------------------------------
-  // Helpers
-  // ----------------------------------------------------------------
+  // ---- Helpers -------------------------------------------------------------
 
   function readText(el: HTMLElement): string {
     if ((el as HTMLTextAreaElement).value != null)
@@ -219,40 +230,27 @@ function init() {
     return el.innerText || el.textContent || "";
   }
 
-  // FIX: replaced 32-bit djb2 hash with SHA-256 via Web Crypto API
   async function sha256(s: string): Promise<string> {
-    const buf = await crypto.subtle.digest(
-      "SHA-256",
-      new TextEncoder().encode(s)
-    );
+    const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
     return Array.from(new Uint8Array(buf))
-      .map((b) => b.toString(16).padStart(2, "0"))
+      .map(b => b.toString(16).padStart(2, "0"))
       .join("");
   }
 
-  // FIX: replaces the 6-try × 600ms tight loop.
-  // Uses exponential backoff: 600ms, 1.2s, 2.4s, 4.8s → max ~9s total.
-  // The AbortController lets the browser cancel if the tab is closed.
-  let pollAbortController: AbortController | null = null;
+  let pollAbort: AbortController | null = null;
 
-  async function pollAnalysis(id: string, maxTries = 5, baseDelayMs = 600) {
-    if (pollAbortController) pollAbortController.abort();
-    pollAbortController = new AbortController();
-    const signal = pollAbortController.signal;
+  async function pollAnalysis(id: string, maxTries = 5, baseMs = 500) {
+    if (pollAbort) pollAbort.abort();
+    pollAbort = new AbortController();
+    const { signal } = pollAbort;
 
     for (let i = 0; i < maxTries; i++) {
       if (signal.aborted) throw new DOMException("Aborted", "AbortError");
-
       const r = await getAnalysis(id);
       if (!r.status || r.status === "done") return r;
-      if (r.status === "unavailable") throw new Error(r.status);
-
-      // Exponential backoff
-      const delay = baseDelayMs * Math.pow(2, i);
-      await sleep(delay, signal);
+      if (r.status === "unavailable") throw new Error("Backend unavailable");
+      await sleep(baseMs * Math.pow(2, i), signal);
     }
-
-    // Final attempt after exhausting retries
     return getAnalysis(id);
   }
 
@@ -271,13 +269,13 @@ function init() {
     const t = text.trim();
     if (t.length < 80) s.push("Add specifics: audience, domain, constraints, and examples.");
     if (!/[?.!]/.test(t)) s.push("Ask as a clear question or add an objective.");
-    if (!/\bn\b|\bwords?\b|\bsteps?\b|\bformat\b|\bstyle\b/i.test(t))
+    if (!/\bwords?\b|\bsteps?\b|\bformat\b|\bstyle\b/i.test(t))
       s.push("Specify length, format, and writing style.");
-    if (/\bjailbreak|\bbypass|\bignore\b.*(rules|instructions)/i.test(t))
+    if (/jailbreak|bypass|ignore.*(rules|instructions)/i.test(t))
       s.push("Remove jailbreak cues or policy-bypassing language.");
     if (scores.style_pct > 70)
       s.push("Vary sentence structure and avoid boilerplate phrases.");
-    if (!s.length) s.push("Nice prompt. Refine with target, style, and constraints if needed.");
+    if (!s.length) s.push("Looks good. Add target audience and constraints to refine further.");
     return s;
   }
 }

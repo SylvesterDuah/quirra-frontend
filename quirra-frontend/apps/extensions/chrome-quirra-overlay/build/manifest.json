@@ -1,0 +1,24 @@
+{
+  "manifest_version": 3,
+  "name": "Quirra",
+  "short_name": "Quirra",
+  "version": "0.4.0",
+  "description": "Know if your AI responses have been generated before.",
+  "permissions": [
+    "storage"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "content_scripts": [
+    {
+      "matches": ["http://*/*", "https://*/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "options_page": "options.html",
+  "action": {
+    "default_title": "Quirra"
+  }
+}

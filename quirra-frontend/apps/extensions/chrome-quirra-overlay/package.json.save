@@ -2,13 +2,15 @@
   "name": "@quirra/chrome-quirra-overlay",
   "private": true,
   "version": "0.1.0",
+  "type": "module",
   "scripts": {
-    "build": "node build.mjs",
+    "typecheck": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json",
+^XD
     "pack": "npm run build && node scripts/zip.js"
   },
   "devDependencies": {
     "@types/chrome": "^0.0.270",
-    "esbuild": "^0.25.0",
     "typescript": "^5.5.4",
     "zip-a-folder": "^3.1.5"
   }
