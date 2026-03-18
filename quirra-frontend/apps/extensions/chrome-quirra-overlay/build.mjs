@@ -1,31 +1,34 @@
+// apps/extensions/chrome-quirra-overlay/build.mjs
 import * as esbuild from "esbuild";
 import { copyFileSync, mkdirSync } from "fs";
 
-// Ensure build dir exists
-mkdirSync("build/lib", { recursive: true });
+mkdirSync("build", { recursive: true });
 
-// Bundle content.ts → single self-contained content.js (no imports)
-await esbuild.build({
-  entryPoints: ["src/content.ts"],
-  bundle: true,
-  outfile: "build/content.js",
-  platform: "browser",
-  target: "chrome110",
-  format: "iife",   
-});
-
-await esbuild.build({
-  entryPoints: ["src/overlay.ts"],
-  bundle: true,
-  outfile: "build/overlay.js",
-  platform: "browser",
-  target: "chrome110",
-  format: "iife",
+const shared = {
+  bundle:    true,
+  platform:  "browser",
+  target:    "chrome110",
+  format:    "iife",
   sourcemap: false,
+};
+
+// Bundle content script — must be IIFE (no import/export) for content scripts
+await esbuild.build({
+  ...shared,
+  entryPoints: ["src/content.ts"],
+  outfile:     "build/content.js",
 });
 
-copyFileSync("manifest.json", "build/manifest.json");
-copyFileSync("options.html",  "build/options.html");
-copyFileSync("options.js",    "build/options.js");
+// Bundle background service worker (keepalive)
+await esbuild.build({
+  ...shared,
+  entryPoints: ["src/keepalive.ts"],
+  outfile:     "build/keepalive.js",
+});
 
-console.log("Build complete.");
+// Copy static files
+for (const f of ["manifest.json", "options.html", "options.js"]) {
+  copyFileSync(f, `build/${f}`);
+}
+
+console.log("✓ Build complete");

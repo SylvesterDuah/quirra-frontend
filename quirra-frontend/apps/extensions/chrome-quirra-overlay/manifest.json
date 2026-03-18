@@ -2,8 +2,8 @@
   "manifest_version": 3,
   "name": "Quirra",
   "short_name": "Quirra",
-  "version": "0.4.0",
-  "description": "Know if your AI responses have been generated before.",
+  "version": "0.5.0",
+  "description": "Instant AI prompt and response analysis — risk, duplicates, and style feedback as you type.",
   "permissions": [
     "storage"
   ],
@@ -17,6 +17,9 @@
       "run_at": "document_idle"
     }
   ],
+  "background": {
+    "service_worker": "keepalive.js"
+  },
   "options_page": "options.html",
   "action": {
     "default_title": "Quirra"

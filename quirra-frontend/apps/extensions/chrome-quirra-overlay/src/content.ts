@@ -1,281 +1,248 @@
 // extensions/chrome-quirra-overlay/src/content.ts
 
-
 import { postEvent, getAnalysis, getCachedUserHash } from "./lib/api";
 import { inferContext, isPublicUrl } from "./lib/context";
 import { QuirraOverlay, type Scores } from "./overlay";
 
-// Only activate on known AI sites
+// ─── AI site allowlist ────────────────────────────────────────────────────────
 const AI_HOSTNAMES = new Set([
-  "chat.openai.com",
-  "chatgpt.com",
+  "chat.openai.com", "chatgpt.com",
   "claude.ai",
-  "gemini.google.com",
-  "bard.google.com",
+  "gemini.google.com", "bard.google.com",
   "copilot.microsoft.com",
-  "bing.com",
-  "you.com",
-  "perplexity.ai",
-  "poe.com",
-  "character.ai",
-  "mistral.ai",
-  "chat.mistral.ai",
+  "you.com", "perplexity.ai", "poe.com",
+  "character.ai", "mistral.ai", "chat.mistral.ai",
   "huggingface.co",
 ]);
 
-const hostname = location.hostname.replace(/^www\./, "");
-const isAiSite = AI_HOSTNAMES.has(hostname);
-const isLocalhost = /^(localhost|127\.0\.0\.1)$/.test(location.hostname);
+const hostname  = location.hostname.replace(/^www\./, "");
+const isAiSite  = AI_HOSTNAMES.has(hostname);
+const isLocal   = /^(localhost|127\.0\.0\.1)$/.test(location.hostname);
 
-if (isAiSite && !isLocalhost) {
-  init();
-}
+if (isAiSite && !isLocal) init();
 
-// ---------------------------------------------------------------------------
-// Local instant scoring — runs entirely in the content script, zero latency
-// ---------------------------------------------------------------------------
+// ─── LOCAL SCORER ─────────────────────────────────────────────────────────────
+// Runs entirely in the content script. Zero network, zero latency.
 
-const POLICY_WORDS = [
-  "bypass", "jailbreak", "exploit", "phishing", "malware", "weapon",
-  "bomb", "poison", "harm", "kill", "deepfake", "hack", "crack",
-  "dox", "leak", "pii", "password", "stereotype", "racist", "sexist",
+const RISK_TERMS = [
+  "bypass", "jailbreak", "exploit", "ignore previous instructions",
+  "ignore all instructions", "phishing", "malware", "weapon",
+  "bomb", "poison", "harm", "kill", "deepfake", "hack", "dox",
+  "password", "racist", "sexist", "hate speech",
 ];
-const LM_TELLS = ["as an ai", "as a language model", "cannot assist"];
+const LM_TELLS = ["as an ai", "as a language model", "cannot assist with that"];
 
 function localScore(text: string): Scores {
-  const t = (text || "").toLowerCase();
+  const t     = (text || "").toLowerCase();
   const words = t.match(/[a-z0-9']+/g) || [];
+  const len   = words.length;
 
-  // Type-token ratio → style sameness
-  const ttr = words.length > 0 ? new Set(words).size / words.length : 1;
-  const style_pct = Math.round(Math.max(0, Math.min(100, (1 - ttr) * 100)));
+  // Style: type-token ratio
+  const ttr       = len > 0 ? new Set(words).size / len : 1;
+  const style_pct = Math.round(Math.max(0, Math.min(100, (1 - ttr) * 150)));
 
-  // Policy hits → risk
-  const hits = POLICY_WORDS.filter(w => t.includes(w)).length;
-  const jailbreak = /ignore previous instructions|bypass|jailbreak/.test(t) ? 1 : 0;
-  const lm_tell = LM_TELLS.some(p => t.includes(p)) ? 1 : 0;
-  const risk = Math.round(Math.min(100, hits * 10 + jailbreak * 25 + lm_tell * 10));
+  // Risk: policy term hits + jailbreak + LM refusal tells
+  const hits      = RISK_TERMS.filter(w => t.includes(w)).length;
+  const jailbreak = /ignore (previous|all) instructions|bypass|jailbreak/.test(t) ? 1 : 0;
+  const lm_tell   = LM_TELLS.some(p => t.includes(p)) ? 1 : 0;
+  const risk      = Math.round(Math.min(100, hits * 12 + jailbreak * 30 + lm_tell * 10));
 
   return { duplication_pct: 0, style_pct, risk, seen_count: 0 };
 }
 
-// ---------------------------------------------------------------------------
-// Main init
-// ---------------------------------------------------------------------------
+function localSuggestions(text: string, scores: Scores): string[] {
+  const s: string[] = [];
+  const t = text.trim();
+  if (t.length < 80)  s.push("Add specifics: audience, domain, and constraints.");
+  if (!/[?.!]/.test(t)) s.push("Ask as a clear question or add an objective.");
+  if (!/\bformat\b|\bstyle\b|\bwords?\b|\bsteps?\b/i.test(t))
+    s.push("Specify the length, format, and writing style you want.");
+  if (/jailbreak|bypass|ignore.*instructions/i.test(t))
+    s.push("Remove jailbreak or policy-bypass language.");
+  if (scores.style_pct > 70)
+    s.push("Vary sentence structure — high style repetition detected.");
+  if (scores.risk > 60)
+    s.push("High risk score — review for policy-sensitive content.");
+  if (!s.length) s.push("Looks good. Add target audience and constraints to refine.");
+  return s;
+}
+
+// ─── INIT ─────────────────────────────────────────────────────────────────────
 
 function init() {
   const overlay = new QuirraOverlay();
 
-
+  // Warm up cached hash + settings immediately on page load so the first
+  // background call has zero cold-start overhead on the extension side.
   getCachedUserHash().catch(() => {});
 
-  // ---- Prompt path --------------------------------------------------------
-  const PROMPT_SELECTOR = [
+  // ── PROMPT pipeline ───────────────────────────────────────────────────────
+
+  const PROMPT_SEL = [
     "textarea",
     '[contenteditable="true"]',
     'div[role="textbox"]',
   ].join(",");
 
-  let promptTimer: ReturnType<typeof setTimeout> | null = null;
-  let lastPromptHash = "";
+  let promptDebounce: ReturnType<typeof setTimeout> | null = null;
+  let lastRemoteHash = "";
 
-  document.addEventListener(
-    "input",
-    (e) => {
-      const t = e.target as HTMLElement | null;
-      if (!t?.matches?.(PROMPT_SELECTOR)) return;
-      const text = readText(t);
-      if (!text || text.trim().length < 24) return;
+  document.addEventListener("input", (e) => {
+    const el = e.target as HTMLElement | null;
+    if (!el?.matches?.(PROMPT_SEL)) return;
+    const text = readText(el);
+    if (!text || text.trim().length < 24) return;
 
-      // FIX: Show LOCAL scores instantly while the user is still typing —
-      // zero network delay, gives immediate feedback on risk and style.
-      const instant = localScore(text);
-      const suggestions = buildPromptSuggestions(text, instant);
-      overlay.showPromptResults(instant, suggestions, true); // true = "local preview"
+    // ── INSTANT: show local scores immediately, no waiting ────────────────
+    const instant      = localScore(text);
+    const suggestions  = localSuggestions(text, instant);
+    overlay.showPromptResults(instant, suggestions, true);
 
-      // Then debounce the backend call for a full server-side analysis
-      if (promptTimer) clearTimeout(promptTimer);
-      promptTimer = setTimeout(() => void analyzePromptRemote(text), 300);
-    },
-    { capture: true }
-  );
+    // ── BACKGROUND: debounce remote call, doesn't block UI ───────────────
+    if (promptDebounce) clearTimeout(promptDebounce);
+    promptDebounce = setTimeout(() => void remotePrompt(text), 1000);
+  }, { capture: true });
 
-  async function analyzePromptRemote(text: string) {
+  async function remotePrompt(text: string) {
     try {
-      const hash = await sha256(text.replace(/\s+/g, " ").trim().toLowerCase());
-      if (hash === lastPromptHash) return;
-      lastPromptHash = hash;
+      const hash = await sha256(text.trim().toLowerCase().replace(/\s+/g, " "));
+      if (hash === lastRemoteHash) return;
+      lastRemoteHash = hash;
 
-      const user_hash = await getCachedUserHash();
+      const user_hash  = await getCachedUserHash();
       const { event_id } = await postEvent({
-        kind: "prompt",
-        content: text,
+        kind: "prompt", content: text,
         metadata: { user_hash, url: location.href, context: inferContext(text), public: false },
       });
-
       const ar = await getAnalysis(event_id);
-
-      overlay.showPromptResults(ar.scores as Scores, buildPromptSuggestions(text, ar.scores as Scores), false);
+      // Silently upgrade the overlay with server scores
+      overlay.showPromptResults(
+        ar.scores as Scores,
+        localSuggestions(text, ar.scores as Scores),
+        false
+      );
     } catch (e) {
-
-      const msg = e instanceof Error ? e.message : String(e);
-      overlay.appendBackendError(msg);
+      // Don't overwrite local result — just append a small warning
+      overlay.appendNote(e instanceof Error ? e.message : "Backend unreachable");
     }
   }
 
-  // ---- Response path -------------------------------------------------------
-  const RESPONSE_SELECTORS = [
-    '[data-testid="ai-response"]',
-    '[data-testid="conversation-turn-content"]',
+  // ── RESPONSE pipeline ─────────────────────────────────────────────────────
+
+  const RESPONSE_SELS = [
     '[data-message-author-role="assistant"]',
-    ".assistant-message",
+    '[data-testid="conversation-turn-content"]',
     ".font-claude-message",
+    ".assistant-message",
     ".response-content",
-    ".ai-output",
+    '[data-testid="ai-response"]',
   ];
 
   function getLatestResponse(): string {
-    for (const sel of RESPONSE_SELECTORS) {
-      const nodes = Array.from(document.querySelectorAll(sel));
-      if (nodes.length) {
-        const last = nodes[nodes.length - 1] as HTMLElement;
-        const txt = (last.innerText || last.textContent || "").trim();
-        if (txt.length > 10) return txt;
-      }
+    for (const sel of RESPONSE_SELS) {
+      const nodes = [...document.querySelectorAll(sel)];
+      if (!nodes.length) continue;
+      const txt = ((nodes.at(-1) as HTMLElement).innerText || "").trim();
+      if (txt.length > 10) return txt;
     }
     return "";
   }
 
-  let lastResponseSent = "";
-  let responseInFlight = false;
-  let responseTimer: ReturnType<typeof setTimeout> | null = null;
+  let lastResponseText  = "";
+  let responseInFlight  = false;
+  let responseDebounce: ReturnType<typeof setTimeout> | null = null;
 
-  function scheduleResponseAnalysis(text: string) {
+  function onResponseMutation() {
+    const text = getLatestResponse();
+    if (!text) return;
+
+    // ── INSTANT: show local score for the response immediately ───────────
     const instant = localScore(text);
-    overlay.showResults(instant, [], [], true); // true = "local preview"
+    overlay.showResults(instant, [], [], true);
 
-    // Debounce the backend call — wait for streaming to settle
-    if (responseTimer) clearTimeout(responseTimer);
-    responseTimer = setTimeout(() => {
-      if (text !== lastResponseSent && !responseInFlight) {
-        lastResponseSent = text;
-        void analyzeResponseRemote(text);
+    // ── BACKGROUND: wait for streaming to settle, then send to backend ───
+    if (responseDebounce) clearTimeout(responseDebounce);
+    responseDebounce = setTimeout(() => {
+      if (text !== lastResponseText && !responseInFlight) {
+        lastResponseText = text;
+        void remoteResponse(text);
       }
-    }, 800);
+    }, 1200);
   }
 
-  async function analyzeResponseRemote(text: string) {
+  async function remoteResponse(text: string) {
     responseInFlight = true;
     try {
-      const user_hash = await getCachedUserHash();
-      const { event_id } = await postEvent({
-        kind: "response",
-        content: text,
-        metadata: {
-          user_hash,
-          url: location.href,
-          context: inferContext(text),
-          public: isPublicUrl(location.href),
-        },
+      const user_hash     = await getCachedUserHash();
+      const { event_id }  = await postEvent({
+        kind: "response", content: text,
+        metadata: { user_hash, url: location.href, context: inferContext(text), public: isPublicUrl(location.href) },
       });
-
       const analysis = await pollAnalysis(event_id);
       overlay.showResults(
         analysis.scores as Scores,
         analysis.neighbors || [],
-        analysis.labels || [],
+        analysis.labels   || [],
         false
       );
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      overlay.appendBackendError(msg);
+      overlay.appendNote(e instanceof Error ? e.message : "Backend unreachable");
     } finally {
       responseInFlight = false;
     }
   }
 
-  // Scope observer to chat container, not entire document
-  function findObserveTarget(): Element {
-    for (const sel of ["main", '[role="main"]', '[class*="chat"]', '[class*="conversation"]', '[id*="chat"]']) {
+  // Scope observer to chat container — never document root
+  function chatContainer(): Element {
+    for (const sel of ["main", '[role="main"]', '[class*="chat"]', '[class*="conversation"]']) {
       const el = document.querySelector(sel);
       if (el) return el;
     }
     return document.body;
   }
 
-  const mo = new MutationObserver(() => {
-    const text = getLatestResponse();
-    if (text) scheduleResponseAnalysis(text);
-  });
-
-  mo.observe(findObserveTarget(), {
-    childList: true,
-    subtree: true,
-    attributes: false,
-    characterData: false,
-  });
+  const mo = new MutationObserver(onResponseMutation);
+  mo.observe(chatContainer(), { childList: true, subtree: true, attributes: false, characterData: false });
 
   window.addEventListener("beforeunload", () => {
     mo.disconnect();
-    if (responseTimer) clearTimeout(responseTimer);
-    if (promptTimer) clearTimeout(promptTimer);
+    if (promptDebounce)   clearTimeout(promptDebounce);
+    if (responseDebounce) clearTimeout(responseDebounce);
     overlay.destroy();
   });
 
-  // ---- Helpers -------------------------------------------------------------
+  // ── Helpers ───────────────────────────────────────────────────────────────
 
   function readText(el: HTMLElement): string {
-    if ((el as HTMLTextAreaElement).value != null)
-      return (el as HTMLTextAreaElement).value;
-    return el.innerText || el.textContent || "";
+    return (el as HTMLTextAreaElement).value ?? el.innerText ?? el.textContent ?? "";
   }
 
   async function sha256(s: string): Promise<string> {
     const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
-    return Array.from(new Uint8Array(buf))
-      .map(b => b.toString(16).padStart(2, "0"))
-      .join("");
+    return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, "0")).join("");
   }
 
   let pollAbort: AbortController | null = null;
 
-  async function pollAnalysis(id: string, maxTries = 5, baseMs = 500) {
+  async function pollAnalysis(id: string, tries = 6, baseMs = 600) {
     if (pollAbort) pollAbort.abort();
     pollAbort = new AbortController();
     const { signal } = pollAbort;
 
-    for (let i = 0; i < maxTries; i++) {
+    for (let i = 0; i < tries; i++) {
       if (signal.aborted) throw new DOMException("Aborted", "AbortError");
       const r = await getAnalysis(id);
-      if (!r.status || r.status === "done") return r;
-      if (r.status === "unavailable") throw new Error("Backend unavailable");
-      await sleep(baseMs * Math.pow(2, i), signal);
+      if (!r.status || r.status === "done")        return r;
+      if (r.status === "unavailable")              throw new Error("Backend unavailable");
+      await sleep(baseMs * Math.pow(2, i), signal); // 600 → 1.2s → 2.4s → 4.8s → 9.6s
     }
     return getAnalysis(id);
   }
 
   function sleep(ms: number, signal?: AbortSignal): Promise<void> {
-    return new Promise((resolve, reject) => {
-      const t = setTimeout(resolve, ms);
-      signal?.addEventListener("abort", () => {
-        clearTimeout(t);
-        reject(new DOMException("Aborted", "AbortError"));
-      });
+    return new Promise((res, rej) => {
+      const t = setTimeout(res, ms);
+      signal?.addEventListener("abort", () => { clearTimeout(t); rej(new DOMException("Aborted", "AbortError")); });
     });
-  }
-
-  function buildPromptSuggestions(text: string, scores: Scores): string[] {
-    const s: string[] = [];
-    const t = text.trim();
-    if (t.length < 80) s.push("Add specifics: audience, domain, constraints, and examples.");
-    if (!/[?.!]/.test(t)) s.push("Ask as a clear question or add an objective.");
-    if (!/\bwords?\b|\bsteps?\b|\bformat\b|\bstyle\b/i.test(t))
-      s.push("Specify length, format, and writing style.");
-    if (/jailbreak|bypass|ignore.*(rules|instructions)/i.test(t))
-      s.push("Remove jailbreak cues or policy-bypassing language.");
-    if (scores.style_pct > 70)
-      s.push("Vary sentence structure and avoid boilerplate phrases.");
-    if (!s.length) s.push("Looks good. Add target audience and constraints to refine further.");
-    return s;
   }
 }
