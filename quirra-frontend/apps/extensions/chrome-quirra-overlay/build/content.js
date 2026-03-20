@@ -383,23 +383,194 @@
   }
 
   // src/content.ts
-  var AI_HOSTNAMES = /* @__PURE__ */ new Set([
-    "chat.openai.com",
-    "chatgpt.com",
-    "claude.ai",
-    "gemini.google.com",
-    "bard.google.com",
-    "copilot.microsoft.com",
-    "you.com",
-    "perplexity.ai",
-    "poe.com",
-    "character.ai",
-    "mistral.ai",
-    "chat.mistral.ai",
-    "huggingface.co"
-  ]);
+  var SITE_CONFIGS = {
+    // ── Claude (claude.ai) ──────────────────────────────────────────────────────
+    "claude.ai": {
+      responseSelectors: [
+        ".font-claude-response-body",
+        '[class*="font-claude-response"]',
+        ".standard-markdown",
+        "[data-is-streaming]"
+      ],
+      promptSelectors: [
+        'div[contenteditable="true"]',
+        "p[data-placeholder]",
+        "textarea"
+      ],
+      containerSelector: '[class*="conversation"]'
+    },
+    // ── ChatGPT (chatgpt.com / chat.openai.com) ──────────────────────────────────
+    // Confirmed from live DOM: responses are in SECTION[data-testid^="conversation-turn-"]
+    // The assistant turn is always even-numbered (turn-2, turn-4 etc.)
+    // .text-message is the stable class on the response content wrapper.
+    "chatgpt.com": {
+      responseSelectors: [
+        '[data-testid^="conversation-turn-"] .text-message',
+        '[data-testid^="conversation-turn-"]',
+        ".text-message",
+        ".flex.flex-col.gap-4.grow"
+      ],
+      promptSelectors: ["#prompt-textarea", "textarea"],
+      containerSelector: ".flex.flex-col.text-sm"
+    },
+    "chat.openai.com": {
+      responseSelectors: [
+        '[data-testid^="conversation-turn-"] .text-message',
+        '[data-testid^="conversation-turn-"]',
+        ".text-message"
+      ],
+      promptSelectors: ["#prompt-textarea", "textarea"],
+      containerSelector: "main"
+    },
+    // ── Gemini (gemini.google.com) ────────────────────────────────────────────────
+    // Confirmed from live DOM:
+    //   data-xid="aim-zsv2-turns-container" is the conversation container
+    //   jsname="H7tCnf" is the response text element
+    //   data-xid="aim-zero-state" wraps the full response area
+    "gemini.google.com": {
+      responseSelectors: [
+        '[jsname="H7tCnf"]',
+        '[data-xid="aim-zsv2-turns-container"]',
+        '[data-xid="aim-zero-state"]'
+      ],
+      promptSelectors: [
+        "textarea",
+        'div[contenteditable="true"]',
+        '[jsname="tgaKEf"]'
+      ],
+      containerSelector: '[data-xid="aim-zsv2-turns-container"]'
+    },
+    "bard.google.com": {
+      responseSelectors: [
+        '[jsname="H7tCnf"]',
+        '[data-xid="aim-zsv2-turns-container"]'
+      ],
+      promptSelectors: ["textarea", 'div[contenteditable="true"]'],
+      containerSelector: '[data-xid="aim-zsv2-turns-container"]'
+    },
+    // ── Microsoft Copilot (copilot.microsoft.com) ───────────────────────────────
+    "copilot.microsoft.com": {
+      responseSelectors: [
+        '[data-testid="ai-message"]',
+        ".ac-adaptiveCard",
+        "cib-message[role='assistant']",
+        ".cib-chat-turn"
+      ],
+      promptSelectors: ["textarea", 'div[contenteditable="true"]'],
+      containerSelector: "cib-chat-turn"
+    },
+    // ── Perplexity (perplexity.ai) ──────────────────────────────────────────────
+    "perplexity.ai": {
+      responseSelectors: [
+        ".prose",
+        '[data-testid="answer-text"]',
+        ".answer-content",
+        "[class*='prose']"
+      ],
+      promptSelectors: ["textarea"],
+      containerSelector: "main"
+    },
+    // ── Poe (poe.com) ───────────────────────────────────────────────────────────
+    "poe.com": {
+      responseSelectors: [
+        ".Message_humanMessage__N9TQi",
+        "[class*='Message_botMessage']",
+        "[class*='Message_humanMessage']",
+        ".Markdown_markdownContainer__Tz3AP",
+        "[class*='Markdown_markdownContainer']"
+      ],
+      promptSelectors: ["textarea"],
+      containerSelector: "[class*='ChatMessagesView']"
+    },
+    // ── You.com ──────────────────────────────────────────────────────────────────
+    "you.com": {
+      responseSelectors: [
+        "[data-testid='youchat-response']",
+        ".chatResult",
+        "[class*='chatResult']",
+        ".prose"
+      ],
+      promptSelectors: ["textarea"],
+      containerSelector: "main"
+    },
+    // ── Character.ai ─────────────────────────────────────────────────────────────
+    "character.ai": {
+      responseSelectors: [
+        "[class*='ChatMessage_']",
+        "p.swiper-no-swiping",
+        "[data-testid='user-response']"
+      ],
+      promptSelectors: ["textarea"],
+      containerSelector: "[class*='ChatBody']"
+    },
+    // ── Mistral (mistral.ai / chat.mistral.ai) ───────────────────────────────────
+    "mistral.ai": {
+      responseSelectors: [
+        "[class*='AssistantMessage']",
+        "[class*='assistant-message']",
+        ".prose"
+      ],
+      promptSelectors: ["textarea"],
+      containerSelector: "main"
+    },
+    "chat.mistral.ai": {
+      responseSelectors: [
+        "[class*='AssistantMessage']",
+        ".prose"
+      ],
+      promptSelectors: ["textarea"],
+      containerSelector: "main"
+    },
+    // ── Replit (replit.com) ──────────────────────────────────────────────────────
+    "replit.com": {
+      responseSelectors: [
+        "[class*='assistant']",
+        "[data-cy='assistant-message']",
+        ".prose",
+        "[class*='AiResponse']",
+        "[class*='aiResponse']"
+      ],
+      promptSelectors: ["textarea", 'div[contenteditable="true"]'],
+      containerSelector: "[class*='chat']"
+    },
+    // ── Lovable (lovable.dev) ────────────────────────────────────────────────────
+    "lovable.dev": {
+      responseSelectors: [
+        "[class*='assistant']",
+        "[class*='AiMessage']",
+        ".prose",
+        "[class*='message-content']"
+      ],
+      promptSelectors: ["textarea"],
+      containerSelector: "[class*='chat']"
+    },
+    // ── Bolt (bolt.new) ──────────────────────────────────────────────────────────
+    "bolt.new": {
+      responseSelectors: [
+        "[class*='assistant']",
+        "[class*='AssistantMessage']",
+        ".prose"
+      ],
+      promptSelectors: ["textarea"],
+      containerSelector: "[class*='chat']"
+    },
+    // ── Hugging Face ─────────────────────────────────────────────────────────────
+    "huggingface.co": {
+      responseSelectors: [
+        ".prose",
+        "[class*='assistant']",
+        "[data-testid='chatbot-user']"
+      ],
+      promptSelectors: ["textarea"],
+      containerSelector: "main"
+    }
+  };
   var hostname = location.hostname.replace(/^www\./, "");
-  if (AI_HOSTNAMES.has(hostname)) init();
+  var siteConfig = SITE_CONFIGS[hostname];
+  if (!siteConfig) {
+  } else {
+    init(siteConfig);
+  }
   function getStableBrowserId() {
     const KEY = "__quirra_uid__";
     let id = localStorage.getItem(KEY);
@@ -478,7 +649,7 @@
     if (!document.getElementById("quirra-hl-style")) {
       const s = document.createElement("style");
       s.id = "quirra-hl-style";
-      s.textContent = `.${HL_CLASS}{outline:2px solid rgba(248,113,113,.55)!important;outline-offset:3px!important;border-radius:6px!important;background:rgba(248,113,113,.08)!important;transition:outline .3s,background .3s!important}`;
+      s.textContent = `.${HL_CLASS}{outline:2px solid rgba(248,113,113,.55)!important;outline-offset:3px!important;border-radius:6px!important;background:rgba(248,113,113,.08)!important}`;
       document.head.appendChild(s);
     }
   }
@@ -499,9 +670,8 @@
         <div style="font-size:12px;opacity:.9">${escHtml(alert.message)}</div>
         ${firstSeen}${sourceHtml}
       </div>
-      <button id="quirra-toast-close" style="background:none;border:none;color:rgba(255,255,255,.6);cursor:pointer;font-size:16px;padding:0;line-height:1">\u2715</button>
-    </div>
-  `;
+      <button id="quirra-toast-close" style="background:none;border:none;color:rgba(255,255,255,.6);cursor:pointer;font-size:16px;padding:0">\u2715</button>
+    </div>`;
     Object.assign(toast.style, {
       position: "fixed",
       top: "20px",
@@ -513,7 +683,6 @@
       background: "rgba(30,10,10,0.92)",
       border: "1px solid rgba(248,113,113,0.45)",
       backdropFilter: "blur(14px)",
-      WebkitBackdropFilter: "blur(14px)",
       color: "#f0f0f4",
       fontFamily: "system-ui,-apple-system,sans-serif",
       boxShadow: "0 8px 28px rgba(0,0,0,.5)",
@@ -532,7 +701,7 @@
     });
     setTimeout(() => toast.remove(), 8e3);
   }
-  function init() {
+  function init(config) {
     const overlay = new QuirraOverlay();
     let cachedUserHash = null;
     async function getUserHash() {
@@ -543,11 +712,11 @@
     }
     getUserHash().catch(() => {
     });
-    const PROMPT_SEL = [
+    const PROMPT_SEL = (config.promptSelectors ?? [
       "textarea",
-      '[contenteditable="true"]',
-      'div[role="textbox"]'
-    ].join(",");
+      'div[contenteditable="true"]',
+      "p[data-placeholder]"
+    ]).join(",");
     let promptTimer = null;
     let lastPromptHash = "";
     document.addEventListener("input", (e) => {
@@ -555,7 +724,8 @@
       if (!el?.matches?.(PROMPT_SEL)) return;
       const text = readText(el);
       if (!text || text.trim().length < 24) return;
-      overlay.showPromptResults(localScore(text), localSuggestions(text, localScore(text)), true);
+      const instant = localScore(text);
+      overlay.showPromptResults(instant, localSuggestions(text, instant), true);
       if (promptTimer) clearTimeout(promptTimer);
       promptTimer = setTimeout(() => void remotePrompt(text), 1e3);
     }, { capture: true });
@@ -576,31 +746,21 @@
         overlay.appendNote(e instanceof Error ? e.message : "Backend unreachable");
       }
     }
-    const RESPONSE_SELS = [
-      // ChatGPT
-      '[data-message-author-role="assistant"]',
-      // Claude
-      '[data-testid="conversation-turn-content"]',
-      ".font-claude-message",
-      // Generic
-      ".assistant-message",
-      ".response-content",
-      '[data-testid="ai-response"]',
-      // Gemini
-      "message-content",
-      ".model-response-text",
-      // Perplexity
-      ".prose"
-    ];
     function getLatestResponse() {
-      for (const sel of RESPONSE_SELS) {
+      for (const sel of config.responseSelectors) {
         const nodes = [...document.querySelectorAll(sel)];
         if (!nodes.length) continue;
-        const el = nodes.at(-1);
-        const txt = (el.innerText || el.textContent || "").trim();
-        if (txt.length > 80) return { el, text: txt };
+        const el2 = nodes.at(-1);
+        const txt = (el2.innerText || el2.textContent || "").trim();
+        if (txt.length > 80) return { el: el2, text: txt };
       }
-      return null;
+      const candidates = [...document.querySelectorAll("p, div, article")].filter((el2) => {
+        const txt = (el2.innerText || "").trim();
+        return txt.length > 150 && txt.length < 15e3 && el2.children.length < 10 && !el2.matches(PROMPT_SEL) && !el2.closest("nav, header, footer, aside, [class*='sidebar'], [class*='input']");
+      });
+      if (!candidates.length) return null;
+      const el = candidates.at(-1);
+      return { el, text: (el.innerText || "").trim() };
     }
     let lastAnalyzedHash = "";
     let responseInFlight = false;
@@ -648,27 +808,10 @@
         responseInFlight = false;
       }
     }
-    let observeTarget = document.body;
-    let mo;
-    function getBestContainer() {
-      const candidates = [
-        "main",
-        '[role="main"]',
-        '[class*="chat"]',
-        '[class*="conversation"]',
-        '[class*="messages"]',
-        '[class*="thread"]'
-      ];
-      for (const sel of candidates) {
-        const el = document.querySelector(sel);
-        if (el && el !== document.body) return el;
-      }
-      return document.body;
-    }
     function onMutation() {
-      if (observeTarget === document.body) {
-        const better = getBestContainer();
-        if (better !== document.body) {
+      if (observeTarget === document.body && config.containerSelector) {
+        const better = document.querySelector(config.containerSelector);
+        if (better && better !== document.body) {
           mo.disconnect();
           observeTarget = better;
           mo.observe(observeTarget, OBS_OPTIONS);
@@ -681,33 +824,28 @@
       }
       if (responseTimer) clearTimeout(responseTimer);
       responseTimer = setTimeout(() => {
-        if (!responseInFlight) {
-          void analyzeResponse(result.text, result.el);
-        }
+        if (!responseInFlight) void analyzeResponse(result.text, result.el);
       }, 1500);
     }
-    const OBS_OPTIONS = {
-      childList: true,
-      subtree: true,
-      attributes: false,
-      characterData: false
-    };
-    mo = new MutationObserver(onMutation);
-    observeTarget = getBestContainer();
+    const OBS_OPTIONS = { childList: true, subtree: true, attributes: false, characterData: false };
+    let observeTarget = (config.containerSelector ? document.querySelector(config.containerSelector) : null) ?? document.body;
+    let mo = new MutationObserver(onMutation);
     mo.observe(observeTarget, OBS_OPTIONS);
-    const bodyWatcher = new MutationObserver(() => {
-      const better = getBestContainer();
-      if (better !== document.body && better !== observeTarget) {
-        mo.disconnect();
-        observeTarget = better;
-        mo.observe(observeTarget, OBS_OPTIONS);
-        bodyWatcher.disconnect();
-      }
-    });
-    bodyWatcher.observe(document.body, { childList: true, subtree: false });
+    if (observeTarget === document.body) {
+      const bodyWatcher = new MutationObserver(() => {
+        if (!config.containerSelector) return;
+        const better = document.querySelector(config.containerSelector);
+        if (better && better !== observeTarget) {
+          mo.disconnect();
+          observeTarget = better;
+          mo.observe(observeTarget, OBS_OPTIONS);
+          bodyWatcher.disconnect();
+        }
+      });
+      bodyWatcher.observe(document.body, { childList: true, subtree: false });
+    }
     window.addEventListener("beforeunload", () => {
       mo.disconnect();
-      bodyWatcher.disconnect();
       if (promptTimer) clearTimeout(promptTimer);
       if (responseTimer) clearTimeout(responseTimer);
       removeHighlight();
