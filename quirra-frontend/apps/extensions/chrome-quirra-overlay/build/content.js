@@ -1,18 +1,48 @@
 "use strict";
 (() => {
+  var __defProp = Object.defineProperty;
+  var __getOwnPropNames = Object.getOwnPropertyNames;
+  var __esm = (fn, res) => function __init() {
+    return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
+  };
+  var __export = (target, all) => {
+    for (var name in all)
+      __defProp(target, name, { get: all[name], enumerable: true });
+  };
+
   // src/lib/api.ts
+  var api_exports = {};
+  __export(api_exports, {
+    getAnalysis: () => getAnalysis,
+    hashUserServerSide: () => hashUserServerSide,
+    postEvent: () => postEvent
+  });
   async function getSettings() {
+    if (_settingsCache) return _settingsCache;
     const v = await chrome.storage.sync.get({ backend: "", secret: "" });
-    return { backend: (v.backend || "").replace(/\/+$/, ""), secret: v.secret || "" };
+    _settingsCache = {
+      backend: (v.backend || "").replace(/\/+$/, ""),
+      secret: v.secret || ""
+    };
+    chrome.storage.onChanged.addListener(() => {
+      _settingsCache = null;
+    });
+    return _settingsCache;
   }
-  function authHeaders(secret) {
+  function assertBackend(backend) {
+    if (!backend) throw new Error(
+      "Quirra: backend URL not set. Go to Extension options and enter your backend URL."
+    );
+  }
+  function auth(secret) {
     return secret ? { "X-Quirra-Secret": secret } : {};
   }
   async function hashUserServerSide(userId) {
     const { backend, secret } = await getSettings();
+    assertBackend(backend);
     const r = await fetch(`${backend}/api/v1/hash`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", ...authHeaders(secret) },
+      headers: { "Content-Type": "application/json", ...auth(secret) },
       body: JSON.stringify({ user_id: userId })
     });
     const j = await r.json();
@@ -21,9 +51,10 @@
   }
   async function postEvent(payload) {
     const { backend, secret } = await getSettings();
+    assertBackend(backend);
     const r = await fetch(`${backend}/api/v1/events`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", ...authHeaders(secret) },
+      headers: { "Content-Type": "application/json", ...auth(secret) },
       body: JSON.stringify(payload)
     });
     const j = await r.json();
@@ -32,203 +63,323 @@
   }
   async function getAnalysis(eventId) {
     const { backend, secret } = await getSettings();
+    assertBackend(backend);
     const r = await fetch(`${backend}/api/v1/events/${eventId}/analysis`, {
-      headers: authHeaders(secret)
+      headers: auth(secret)
     });
     const j = await r.json();
     if (!r.ok) throw new Error(j?.detail || "Analysis fetch failed");
     return j;
   }
-
-  // src/lib/identity.ts
-  async function getStableBrowserId() {
-    const key = "quirra_browser_id";
-    const existing = await chrome.storage.local.get(key);
-    if (existing[key]) return existing[key];
-    const id = crypto.randomUUID();
-    await chrome.storage.local.set({ [key]: id });
-    return id;
-  }
-
-  // src/lib/context.ts
-  function inferContext(text) {
-    const t = (text || "").toLowerCase();
-    if (t.includes("essay") || t.includes("assignment")) return "course essay";
-    if (t.includes("blog") || t.includes("seo")) return "blog brief";
-    if (t.includes("memo") || t.includes("update")) return "team memo";
-    if (t.includes("outline")) return "outline";
-    return "general";
-  }
-  function isPublicUrl(href) {
-    try {
-      const u = new URL(href);
-      return ["http:", "https:"].includes(u.protocol) && u.hostname !== "localhost";
-    } catch {
-      return false;
+  var _settingsCache;
+  var init_api = __esm({
+    "src/lib/api.ts"() {
+      "use strict";
+      _settingsCache = null;
     }
-  }
+  });
+
+  // src/content.ts
+  init_api();
 
   // src/overlay.ts
   var QuirraOverlay = class {
     constructor() {
       this.mounted = false;
-      this.onKeyDown = (e) => {
-        if (e.altKey) document.documentElement.classList.add("quirra-alt");
-      };
-      this.onKeyUp = () => {
-        document.documentElement.classList.remove("quirra-alt");
-      };
+      this.state = "full";
+      this.opacity = 0.85;
       this.root = document.createElement("div");
-      this.root.className = "quirra-overlay";
-      this.root.setAttribute("aria-live", "polite");
-      this.content = document.createElement("div");
-      this.content.className = "quirra-card";
-      this.root.appendChild(this.content);
+      this.root.className = "qr-root";
+      this.bubble = document.createElement("div");
+      this.bubble.className = "qr-bubble";
+      this.bubble.innerHTML = `<span class="qr-bubble-q">Q</span>`;
+      this.bubble.title = "Expand Quirra";
+      this.bubble.addEventListener("click", () => this.setState("full"));
+      this.card = document.createElement("div");
+      this.card.className = "qr-card";
+      const header = document.createElement("div");
+      header.className = "qr-header";
+      header.innerHTML = `
+      <span class="qr-title">Quirra</span>
+      <div class="qr-controls">
+        <button class="qr-btn" data-action="opacity" title="Transparency">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><path d="M12 3a9 9 0 1 0 0 18A9 9 0 0 0 12 3zm0 2a7 7 0 0 1 0 14V5z"/></svg>
+        </button>
+        <button class="qr-btn" data-action="resize" title="Compact/Full">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><path d="M4 8h16v2H4zm0 6h16v2H4z"/></svg>
+        </button>
+        <button class="qr-btn qr-btn-min" data-action="minimize" title="Minimize to Q">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><path d="M19 13H5v-2h14v2z"/></svg>
+        </button>
+      </div>
+    `;
+      header.querySelector(".qr-controls").addEventListener("click", (e) => {
+        const btn = e.target.closest("[data-action]");
+        if (!btn) return;
+        e.stopPropagation();
+        const action = btn.dataset.action;
+        if (action === "minimize") this.setState("minimized");
+        if (action === "resize") this.setState(this.state === "compact" ? "full" : "compact");
+        if (action === "opacity") this.slider.classList.toggle("qr-hidden");
+      });
+      this.makeDraggable(header);
+      this.slider = document.createElement("input");
+      this.slider.type = "range";
+      this.slider.min = "20";
+      this.slider.max = "98";
+      this.slider.value = String(Math.round(this.opacity * 100));
+      this.slider.className = "qr-opacity-slider qr-hidden";
+      this.slider.addEventListener("input", () => {
+        this.opacity = Number(this.slider.value) / 100;
+        this.card.style.background = `rgba(14,14,20,${this.opacity})`;
+      });
+      this.body = document.createElement("div");
+      this.body.className = "qr-body";
+      this.card.appendChild(header);
+      this.card.appendChild(this.slider);
+      this.card.appendChild(this.body);
+      this.root.appendChild(this.bubble);
+      this.root.appendChild(this.card);
     }
+    // ── Public API ────────────────────────────────────────────────────────────
     mount() {
       if (this.mounted) return;
       this.injectStyles();
       document.body.appendChild(this.root);
       this.mounted = true;
-      window.addEventListener("keydown", this.onKeyDown);
-      window.addEventListener("keyup", this.onKeyUp);
-      window.addEventListener("blur", this.onKeyUp);
+      this.applyState();
     }
     destroy() {
       if (!this.mounted) return;
       this.root.remove();
-      document.documentElement.classList.remove("quirra-alt");
-      window.removeEventListener("keydown", this.onKeyDown);
-      window.removeEventListener("keyup", this.onKeyUp);
-      window.removeEventListener("blur", this.onKeyUp);
       this.mounted = false;
     }
-    showAnalyzing() {
+    showPromptResults(scores, suggestions, isPreview) {
       this.mount();
-      this.content.innerHTML = `
-      <div class="qr-head">Quirra</div>
-      <div class="qr-row"><span class="qr-dot"></span><span>Analyzing\u2026</span></div>
-      <div class="qr-hint">Hold <b>Alt</b> to interact</div>
-    `;
-    }
-    showError(msg = "Something went wrong") {
-      this.mount();
-      this.content.innerHTML = `
-      <div class="qr-head">Quirra</div>
-      <div class="qr-err">${escapeHtml(msg)}</div>
-      <div class="qr-hint">Hold <b>Alt</b> to interact</div>
-    `;
-    }
-    showPromptAnalyzing() {
-      this.mount();
-      this.content.innerHTML = `
-      <div class="qr-head">Quirra</div>
-      <div class="qr-row"><span class="qr-dot"></span><span>Analyzing prompt\u2026</span></div>
-      <div class="qr-hint">Hold <b>Alt</b> to interact</div>
-    `;
-    }
-    showPromptResults(scores, suggestions) {
-      this.mount();
-      const riskCls = scores.risk >= 75 ? "qr-red" : scores.risk >= 45 ? "qr-amber" : "qr-green";
-      const tips = suggestions?.length ? `<ul class="qr-list">${suggestions.map((s) => `<li>${escapeHtml(s)}</li>`).join("")}</ul>` : `<div class="qr-sub">No suggestions \u2014 looks good</div>`;
-      this.content.innerHTML = `
-      <div class="qr-head">Quirra</div>
+      this.setBubbleRisk(scores.risk, false);
+      const badge = isPreview ? `<span class="qr-badge">live</span>` : "";
+      this.body.innerHTML = `
       <div class="qr-metrics">
-        <div>Prompt risk: <b class="${riskCls}">${scores.risk}%</b>
-          <span class="qr-sub"> \xB7 dup ${scores.duplication_pct}% \xB7 style ${scores.style_pct}%</span>
-        </div>
+        <span class="qr-lsm">RISK</span>
+        <b class="${rc(scores.risk)}">${scores.risk}%</b>
+        <span class="qr-muted"> \xB7 style ${scores.style_pct}%</span>
+        ${badge}
       </div>
       <div class="qr-section">
-        <div class="qr-title">Suggestions</div>
-        ${tips}
+        <div class="qr-lbl">Suggestions</div>
+        <ul class="qr-list">${suggestions.map((s) => `<li>${esc(s)}</li>`).join("")}</ul>
       </div>
-      <div class="qr-hint">Hold <b>Alt</b> to interact</div>
     `;
     }
-    showResults(scores, neighbors, labels) {
+    showResults(scores, neighbors, labels, isPreview) {
       this.mount();
-      const riskCls = scores.risk >= 75 ? "qr-red" : scores.risk >= 45 ? "qr-amber" : "qr-green";
-      const list = neighbors.slice(0, 5).map((n) => {
-        const sim = n.similarity != null ? ` \xB7 sim ${(n.similarity * 100).toFixed(0)}%` : "";
-        const ctx = n.context ? ` \xB7 ${escapeHtml(n.context)}` : "";
-        const when = n.when ? ` \xB7 ${escapeHtml(timeAgo(n.when))}` : "";
-        const ref = n.url ? ` \xB7 <a href="${escapeAttr(n.url)}" target="_blank" rel="noopener noreferrer">ref</a>` : "";
-        return `<li>\u2022 ${escapeHtml(n.event_id.slice(0, 8))}${ctx}${when}${sim}${ref}</li>`;
+      this.setBubbleRisk(scores.risk, false);
+      const badge = isPreview ? `<span class="qr-badge">refining\u2026</span>` : "";
+      const chips = labels.map((l) => `<span class="qr-chip ${cc(l)}">${esc(l)}</span>`).join("");
+      const neighs = neighbors.slice(0, 5).map((n) => {
+        const sim = n.similarity != null ? ` \xB7 ${(n.similarity * 100).toFixed(0)}%` : "";
+        const when = n.when ? ` \xB7 ${ago(n.when)}` : "";
+        const ref = n.url ? ` <a href="${esc(n.url)}" target="_blank" rel="noopener noreferrer">\u2197</a>` : "";
+        return `<li>${esc(n.event_id.slice(0, 8))}${when}${sim}${ref}</li>`;
       }).join("");
-      const labelChips = (labels ?? []).map((l) => {
-        const cls = l.startsWith("risk:high") ? "qr-chip-red" : l.startsWith("risk:") ? "qr-chip-amber" : l.startsWith("duplicate:") ? "qr-chip-violet" : "qr-chip-default";
-        return `<span class="qr-chip ${cls}">${escapeHtml(l)}</span>`;
-      }).join("");
-      this.content.innerHTML = `
-      <div class="qr-head">Quirra</div>
+      this.body.innerHTML = `
       <div class="qr-metrics">
-        <div>Risk: <b class="${riskCls}">${scores.risk}%</b>
-          <span class="qr-sub"> \xB7 dup ${scores.duplication_pct}% \xB7 style ${scores.style_pct}% \xB7 seen ${scores.seen_count}</span>
+        <span class="qr-lsm">RISK</span>
+        <b class="${rc(scores.risk)}">${scores.risk}%</b>
+        <span class="qr-muted"> \xB7 dup ${scores.duplication_pct}% \xB7 style ${scores.style_pct}% \xB7 seen ${scores.seen_count}</span>
+        ${badge}
+      </div>
+      ${chips ? `<div class="qr-chips">${chips}</div>` : ""}
+      <div class="qr-section">
+        <div class="qr-lbl">Near matches</div>
+        ${neighs ? `<ul class="qr-list">${neighs}</ul>` : `<span class="qr-muted">${isPreview ? "Checking\u2026" : "None found"}</span>`}
+      </div>
+    `;
+    }
+    showDuplicateAlert(scores, alert) {
+      this.mount();
+      this.setState("full");
+      this.setBubbleRisk(scores.risk, true);
+      const firstSeen = alert.first_seen ? `<div class="qr-dm">First seen: <b>${new Date(alert.first_seen).toLocaleDateString()}</b></div>` : "";
+      const sourceLink = alert.source_url ? `<div class="qr-dm">Source: <a href="${esc(alert.source_url)}" target="_blank" rel="noopener noreferrer">${esc(shortUrl(alert.source_url))}</a></div>` : "";
+      this.body.innerHTML = `
+      <div class="qr-dup-banner">
+        <div class="qr-dup-icon">\u26A0</div>
+        <div>
+          <div class="qr-dup-title">Response seen before</div>
+          <div class="qr-dup-msg">${esc(alert.message)}</div>
+          <div class="qr-dup-stats">
+            <span class="qr-dup-stat qr-red">${alert.similarity}% match</span>
+            <span class="qr-dup-stat">Seen ${alert.seen_count}\xD7</span>
+          </div>
+          ${firstSeen}${sourceLink}
         </div>
       </div>
-      ${labelChips ? `<div class="qr-chips">${labelChips}</div>` : ""}
-      ${neighbors.length ? `<div class="qr-section"><div class="qr-title">Near matches</div><ul class="qr-list">${list}</ul></div>` : `<div class="qr-section"><div class="qr-title">Near matches</div><div class="qr-sub">None found</div></div>`}
-      <div class="qr-hint">Hold <b>Alt</b> to interact</div>
+      <div class="qr-section" style="margin-top:8px">
+        <div class="qr-metrics">
+          <span class="qr-lsm">RISK</span>
+          <b class="${rc(scores.risk)}">${scores.risk}%</b>
+          <span class="qr-muted"> \xB7 style ${scores.style_pct}%</span>
+        </div>
+      </div>
     `;
+    }
+    appendNote(msg) {
+      if (!this.mounted) return;
+      let el = this.body.querySelector(".qr-note");
+      if (!el) {
+        el = document.createElement("div");
+        el.className = "qr-note";
+        this.body.appendChild(el);
+      }
+      el.textContent = `\u26A0 ${msg}`;
+    }
+    // ── Private ───────────────────────────────────────────────────────────────
+    setState(s) {
+      this.state = s;
+      this.applyState();
+    }
+    applyState() {
+      const min = this.state === "minimized";
+      this.bubble.style.display = min ? "flex" : "none";
+      this.card.style.display = min ? "none" : "flex";
+      this.card.classList.toggle("qr-compact", this.state === "compact");
+    }
+    setBubbleRisk(risk, isDup) {
+      this.bubble.className = isDup ? "qr-bubble qr-bubble-dup" : risk >= 70 ? "qr-bubble qr-bubble-red" : risk >= 40 ? "qr-bubble qr-bubble-amber" : "qr-bubble qr-bubble-green";
+    }
+    makeDraggable(handle) {
+      let sx = 0, sy = 0, sr = 16, sb = 16, drag = false;
+      handle.style.cursor = "grab";
+      handle.addEventListener("mousedown", (e) => {
+        if (e.target.closest("button")) return;
+        drag = true;
+        sx = e.clientX;
+        sy = e.clientY;
+        const r = this.root.getBoundingClientRect();
+        sr = window.innerWidth - r.right;
+        sb = window.innerHeight - r.bottom;
+        handle.style.cursor = "grabbing";
+        e.preventDefault();
+      });
+      document.addEventListener("mousemove", (e) => {
+        if (!drag) return;
+        this.root.style.right = `${Math.max(0, sr + (sx - e.clientX))}px`;
+        this.root.style.bottom = `${Math.max(0, sb + (sy - e.clientY))}px`;
+      });
+      document.addEventListener("mouseup", () => {
+        if (!drag) return;
+        drag = false;
+        handle.style.cursor = "grab";
+      });
     }
     injectStyles() {
-      if (document.getElementById("quirra-overlay-styles")) return;
-      const css = `
-      .quirra-overlay { position: fixed; right: 18px; bottom: 18px; z-index: 2147483646; pointer-events: none; }
-      html.quirra-alt .quirra-overlay { pointer-events: auto; }
-      .quirra-card {
-        min-width: 280px; max-width: min(380px, 92vw); border-radius: 14px;
-        border: 1px solid rgba(255,255,255,0.18); background: rgba(18,18,24,0.45);
-        -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
-        color: #fff; padding: 10px 12px; font: 13px/1.45 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-        box-shadow: 0 10px 28px rgba(0,0,0,.35);
-      }
-      .qr-head { font-weight: 650; margin-bottom: 6px; font-size: 13px; letter-spacing: .2px; }
-      .qr-row { display: flex; align-items: center; gap: 8px; color: rgba(255,255,255,.85); }
-      .qr-dot { width: 8px; height: 8px; border-radius: 50%; background: rgba(255,255,255,.9); animation: qrPulse 1s infinite alternate; }
-      @keyframes qrPulse { from { opacity: .25; } to { opacity: .9; } }
-      .qr-hint { margin-top: 6px; font-size: 11px; color: rgba(255,255,255,.6); }
-      .qr-err { color: #ffd166; }
-      .qr-metrics { margin: 2px 0 6px 0; }
-      .qr-sub { color: rgba(255,255,255,.6); }
-      .qr-title { font-weight: 600; margin-bottom: 4px; }
-      .qr-section { margin-top: 6px; }
-      .qr-list { margin: 0; padding-left: 14px; color: rgba(255,255,255,.88); }
-      .qr-green { color: #34d399; } .qr-amber { color: #f59e0b; } .qr-red { color: #f87171; }
-      .quirra-card a { color: #a5b4fc; text-decoration: underline; }
-      .qr-chips { display: flex; flex-wrap: wrap; gap: 4px; margin: 4px 0 6px 0; }
-      .qr-chip { font-size: 11px; padding: 2px 7px; border-radius: 999px; border: 1px solid rgba(255,255,255,.15); }
-      .qr-chip-red     { background: rgba(248,113,113,.15); color: #fca5a5; border-color: rgba(248,113,113,.3); }
-      .qr-chip-amber   { background: rgba(245,158,11,.15);  color: #fcd34d; border-color: rgba(245,158,11,.3); }
-      .qr-chip-violet  { background: rgba(167,139,250,.15); color: #c4b5fd; border-color: rgba(167,139,250,.3); }
-      .qr-chip-default { background: rgba(255,255,255,.08); color: rgba(255,255,255,.8); }
+      if (document.getElementById("quirra-styles")) return;
+      const s = document.createElement("style");
+      s.id = "quirra-styles";
+      s.textContent = `
+      /* Root */
+      .qr-root{position:fixed;right:16px;bottom:16px;z-index:2147483646;font-family:system-ui,-apple-system,sans-serif;user-select:none}
+
+      /* Q Bubble */
+      .qr-bubble{width:36px;height:36px;border-radius:50%;background:rgba(14,14,20,.88);border:1.5px solid rgba(255,255,255,.18);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);display:flex;align-items:center;justify-content:center;cursor:pointer;box-shadow:0 4px 16px rgba(0,0,0,.4);transition:transform .15s,box-shadow .15s}
+      .qr-bubble:hover{transform:scale(1.12)}
+      .qr-bubble-q{color:#fff;font-size:15px;font-weight:700;letter-spacing:-.5px}
+      .qr-bubble-green{border-color:rgba(52,211,153,.65);box-shadow:0 0 0 2px rgba(52,211,153,.2)}
+      .qr-bubble-amber{border-color:rgba(245,158,11,.65);box-shadow:0 0 0 2px rgba(245,158,11,.2)}
+      .qr-bubble-red{border-color:rgba(248,113,113,.65);box-shadow:0 0 0 2px rgba(248,113,113,.2)}
+      .qr-bubble-dup{border-color:rgba(248,113,113,.85);animation:qrBubblePulse 1s ease-in-out infinite}
+      @keyframes qrBubblePulse{0%,100%{box-shadow:0 0 0 3px rgba(248,113,113,.35)}50%{box-shadow:0 0 0 7px rgba(248,113,113,.08)}}
+
+      /* Card */
+      .qr-card{display:flex;flex-direction:column;min-width:260px;max-width:min(340px,88vw);border-radius:14px;background:rgba(14,14,20,.85);border:1px solid rgba(255,255,255,.13);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);color:#f0f0f4;font-size:12px;line-height:1.5;box-shadow:0 12px 32px rgba(0,0,0,.45);overflow:hidden}
+      .qr-card.qr-compact .qr-body{display:none}
+      .qr-card.qr-compact{min-width:180px}
+
+      /* Header */
+      .qr-header{display:flex;align-items:center;justify-content:space-between;padding:8px 10px 6px;border-bottom:1px solid rgba(255,255,255,.07);cursor:grab}
+      .qr-header:active{cursor:grabbing}
+      .qr-title{font-size:12px;font-weight:650;letter-spacing:.2px}
+
+      /* Controls */
+      .qr-controls{display:flex;gap:2px}
+      .qr-btn{width:20px;height:20px;border-radius:5px;border:none;background:transparent;color:rgba(255,255,255,.45);cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;transition:background .12s,color .12s}
+      .qr-btn:hover{background:rgba(255,255,255,.1);color:#fff}
+      .qr-btn-min:hover{background:rgba(248,113,113,.2);color:#fca5a5}
+
+      /* Slider */
+      .qr-opacity-slider{width:calc(100% - 20px);margin:0 10px 6px;accent-color:#6366f1;height:3px;cursor:pointer}
+      .qr-hidden{display:none!important}
+
+      /* Body */
+      .qr-body{padding:8px 10px 10px;max-height:300px;overflow-y:auto;scrollbar-width:thin;scrollbar-color:rgba(255,255,255,.12) transparent}
+
+      /* Elements */
+      .qr-metrics{display:flex;align-items:center;flex-wrap:wrap;gap:4px;margin-bottom:5px}
+      .qr-lsm{font-size:10px;color:rgba(255,255,255,.4);text-transform:uppercase;letter-spacing:.5px}
+      .qr-muted{color:rgba(255,255,255,.45)}
+      .qr-section{margin-top:5px}
+      .qr-lbl{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:rgba(255,255,255,.4);margin-bottom:4px}
+      .qr-list{margin:0;padding-left:14px;color:rgba(255,255,255,.88)}
+      .qr-list li{margin-bottom:3px}
+      .qr-note{margin-top:6px;font-size:10px;color:#f59e0b;border-top:1px solid rgba(255,255,255,.07);padding-top:5px}
+      .qr-green{color:#34d399}.qr-amber{color:#f59e0b}.qr-red{color:#f87171}
+      .qr-card a{color:#93c5fd}
+
+      /* Badge */
+      .qr-badge{font-size:9px;padding:1px 6px;border-radius:999px;background:rgba(99,102,241,.25);color:#a5b4fc;border:1px solid rgba(99,102,241,.3);animation:qrPulse 1.4s ease-in-out infinite alternate}
+      @keyframes qrPulse{from{opacity:.4}to{opacity:1}}
+
+      /* Chips */
+      .qr-chips{display:flex;flex-wrap:wrap;gap:3px;margin:4px 0 5px}
+      .qr-chip{font-size:10px;padding:1px 7px;border-radius:999px;border:1px solid rgba(255,255,255,.1)}
+      .qr-chip-red{background:rgba(248,113,113,.15);color:#fca5a5;border-color:rgba(248,113,113,.28)}
+      .qr-chip-amber{background:rgba(245,158,11,.15);color:#fcd34d;border-color:rgba(245,158,11,.28)}
+      .qr-chip-violet{background:rgba(167,139,250,.15);color:#c4b5fd;border-color:rgba(167,139,250,.28)}
+      .qr-chip-grey{background:rgba(255,255,255,.06);color:rgba(255,255,255,.6)}
+
+      /* Duplicate banner */
+      .qr-dup-banner{display:flex;gap:9px;align-items:flex-start;background:rgba(248,113,113,.1);border:1px solid rgba(248,113,113,.3);border-radius:10px;padding:9px 10px}
+      .qr-dup-icon{font-size:15px;flex-shrink:0;margin-top:1px}
+      .qr-dup-title{font-weight:650;font-size:12px;color:#fca5a5;margin-bottom:2px}
+      .qr-dup-msg{font-size:11px;color:rgba(255,255,255,.85);line-height:1.4}
+      .qr-dup-stats{display:flex;gap:6px;margin-top:5px;flex-wrap:wrap}
+      .qr-dup-stat{font-size:10px;padding:1px 7px;border-radius:999px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.12)}
+      .qr-dm{font-size:10px;color:rgba(255,255,255,.5);margin-top:4px}
+      .qr-dm a{color:#fca5a5}
+      .qr-dm b{color:rgba(255,255,255,.8)}
     `;
-      const el = document.createElement("style");
-      el.id = "quirra-overlay-styles";
-      el.textContent = css;
-      document.head.appendChild(el);
+      document.head.appendChild(s);
     }
   };
-  function escapeHtml(s) {
-    return (s || "").replace(
-      /[&<>"]/g,
-      (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]
-    );
+  function rc(r) {
+    return r >= 70 ? "qr-red" : r >= 40 ? "qr-amber" : "qr-green";
   }
-  function escapeAttr(s) {
-    return escapeHtml(s);
+  function cc(l) {
+    if (l.startsWith("risk:high")) return "qr-chip-red";
+    if (l.startsWith("risk:")) return "qr-chip-amber";
+    if (l.startsWith("duplicate:")) return "qr-chip-violet";
+    return "qr-chip-grey";
   }
-  function timeAgo(iso) {
+  function esc(s) {
+    return (s || "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+  }
+  function ago(iso) {
     if (!iso) return "";
-    const then = new Date(iso).getTime();
-    if (Number.isNaN(then)) return "";
-    const diff = Math.max(0, Date.now() - then);
-    const mins = Math.floor(diff / 6e4);
-    if (mins < 1) return "just now";
-    if (mins < 60) return `${mins}m ago`;
-    const hrs = Math.floor(mins / 60);
-    if (hrs < 24) return `${hrs}h ago`;
-    return `${Math.floor(hrs / 24)}d ago`;
+    const m = Math.floor(Math.max(0, Date.now() - new Date(iso).getTime()) / 6e4);
+    if (m < 1) return "just now";
+    if (m < 60) return `${m}m ago`;
+    const h = Math.floor(m / 60);
+    if (h < 24) return `${h}h ago`;
+    return `${Math.floor(h / 24)}d ago`;
+  }
+  function shortUrl(url) {
+    try {
+      const u = new URL(url);
+      return u.hostname;
+    } catch {
+      return url.slice(0, 30);
+    }
   }
 
   // src/content.ts
@@ -239,208 +390,354 @@
     "gemini.google.com",
     "bard.google.com",
     "copilot.microsoft.com",
-    "bing.com",
     "you.com",
     "perplexity.ai",
     "poe.com",
     "character.ai",
     "mistral.ai",
     "chat.mistral.ai",
-    "huggingface.co",
-    "replicate.com",
-    "cluely.com"
+    "huggingface.co"
   ]);
   var hostname = location.hostname.replace(/^www\./, "");
-  var isAiSite = AI_HOSTNAMES.has(hostname);
-  var isLocalhost = /^(localhost|127\.0\.0\.1)$/.test(location.hostname);
-  if (isAiSite && !isLocalhost) {
-    init();
+  if (AI_HOSTNAMES.has(hostname)) init();
+  function getStableBrowserId() {
+    const KEY = "__quirra_uid__";
+    let id = localStorage.getItem(KEY);
+    if (!id) {
+      id = crypto.randomUUID();
+      try {
+        localStorage.setItem(KEY, id);
+      } catch {
+      }
+    }
+    return id;
+  }
+  async function sha256(s) {
+    const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
+    return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
+  }
+  function escHtml(s) {
+    return (s || "").replace(
+      /[&<>"]/g,
+      (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]
+    );
+  }
+  var RISK_TERMS = [
+    "bypass",
+    "jailbreak",
+    "exploit",
+    "ignore previous instructions",
+    "ignore all instructions",
+    "phishing",
+    "malware",
+    "weapon",
+    "bomb",
+    "poison",
+    "harm",
+    "kill",
+    "deepfake",
+    "hack",
+    "dox",
+    "password",
+    "racist",
+    "sexist",
+    "hate speech"
+  ];
+  var LM_TELLS = ["as an ai", "as a language model", "cannot assist with that"];
+  function localScore(text) {
+    const t = (text || "").toLowerCase();
+    const words = t.match(/[a-z0-9']+/g) || [];
+    const len = words.length;
+    const ttr = len > 0 ? new Set(words).size / len : 1;
+    const style_pct = Math.round(Math.max(0, Math.min(100, (1 - ttr) * 150)));
+    const hits = RISK_TERMS.filter((w) => t.includes(w)).length;
+    const jailbreak = /ignore (previous|all) instructions|bypass|jailbreak/.test(t) ? 1 : 0;
+    const lm_tell = LM_TELLS.some((p) => t.includes(p)) ? 1 : 0;
+    const risk = Math.round(Math.min(100, hits * 12 + jailbreak * 30 + lm_tell * 10));
+    return { duplication_pct: 0, style_pct, risk, seen_count: 0 };
+  }
+  function localSuggestions(text, scores) {
+    const s = [];
+    const t = text.trim();
+    if (t.length < 80) s.push("Add specifics: audience, domain, and constraints.");
+    if (!/[?.!]/.test(t)) s.push("Ask as a clear question or add an objective.");
+    if (!/\bformat\b|\bstyle\b|\bwords?\b|\bsteps?\b/i.test(t))
+      s.push("Specify the length, format, and writing style.");
+    if (/jailbreak|bypass|ignore.*instructions/i.test(t))
+      s.push("Remove jailbreak or policy-bypass language.");
+    if (scores.style_pct > 70) s.push("Vary sentence structure \u2014 high repetition detected.");
+    if (scores.risk > 60) s.push("High risk score \u2014 review for policy-sensitive content.");
+    if (!s.length) s.push("Looks good. Add target audience and constraints to refine.");
+    return s;
+  }
+  var HL_CLASS = "quirra-dup-highlight";
+  function highlightResponse(el) {
+    removeHighlight();
+    if (!el) return;
+    el.classList.add(HL_CLASS);
+    if (!document.getElementById("quirra-hl-style")) {
+      const s = document.createElement("style");
+      s.id = "quirra-hl-style";
+      s.textContent = `.${HL_CLASS}{outline:2px solid rgba(248,113,113,.55)!important;outline-offset:3px!important;border-radius:6px!important;background:rgba(248,113,113,.08)!important;transition:outline .3s,background .3s!important}`;
+      document.head.appendChild(s);
+    }
+  }
+  function removeHighlight() {
+    document.querySelectorAll(`.${HL_CLASS}`).forEach((el) => el.classList.remove(HL_CLASS));
+  }
+  function showToast(alert) {
+    document.getElementById("quirra-toast")?.remove();
+    const toast = document.createElement("div");
+    toast.id = "quirra-toast";
+    const firstSeen = alert.first_seen ? `<div style="font-size:11px;opacity:.6;margin-top:3px">First seen: ${new Date(alert.first_seen).toLocaleDateString()}</div>` : "";
+    const sourceHtml = alert.source_url ? `<div style="font-size:11px;margin-top:4px"><a href="${escHtml(alert.source_url)}" target="_blank" rel="noopener noreferrer" style="color:#fca5a5">View source \u2197</a></div>` : "";
+    toast.innerHTML = `
+    <div style="display:flex;align-items:flex-start;gap:10px">
+      <span style="font-size:18px;flex-shrink:0">\u26A0\uFE0F</span>
+      <div style="flex:1">
+        <div style="font-weight:650;margin-bottom:3px;font-size:13px">Response seen before</div>
+        <div style="font-size:12px;opacity:.9">${escHtml(alert.message)}</div>
+        ${firstSeen}${sourceHtml}
+      </div>
+      <button id="quirra-toast-close" style="background:none;border:none;color:rgba(255,255,255,.6);cursor:pointer;font-size:16px;padding:0;line-height:1">\u2715</button>
+    </div>
+  `;
+    Object.assign(toast.style, {
+      position: "fixed",
+      top: "20px",
+      right: "20px",
+      zIndex: "2147483647",
+      maxWidth: "360px",
+      padding: "12px 14px",
+      borderRadius: "12px",
+      background: "rgba(30,10,10,0.92)",
+      border: "1px solid rgba(248,113,113,0.45)",
+      backdropFilter: "blur(14px)",
+      WebkitBackdropFilter: "blur(14px)",
+      color: "#f0f0f4",
+      fontFamily: "system-ui,-apple-system,sans-serif",
+      boxShadow: "0 8px 28px rgba(0,0,0,.5)",
+      animation: "quirraSlideIn .3s ease"
+    });
+    if (!document.getElementById("quirra-toast-anim")) {
+      const s = document.createElement("style");
+      s.id = "quirra-toast-anim";
+      s.textContent = `@keyframes quirraSlideIn{from{opacity:0;transform:translateX(20px)}to{opacity:1;transform:translateX(0)}}`;
+      document.head.appendChild(s);
+    }
+    document.body.appendChild(toast);
+    document.getElementById("quirra-toast-close")?.addEventListener("click", () => {
+      toast.remove();
+      removeHighlight();
+    });
+    setTimeout(() => toast.remove(), 8e3);
   }
   function init() {
     const overlay = new QuirraOverlay();
-    const PROMPT_SELECTOR = [
+    let cachedUserHash = null;
+    async function getUserHash() {
+      if (cachedUserHash) return cachedUserHash;
+      const { hashUserServerSide: hashUserServerSide2 } = await Promise.resolve().then(() => (init_api(), api_exports));
+      cachedUserHash = await hashUserServerSide2(getStableBrowserId());
+      return cachedUserHash;
+    }
+    getUserHash().catch(() => {
+    });
+    const PROMPT_SEL = [
       "textarea",
       '[contenteditable="true"]',
       'div[role="textbox"]'
     ].join(",");
     let promptTimer = null;
     let lastPromptHash = "";
-    document.addEventListener(
-      "input",
-      (e) => {
-        const t = e.target;
-        if (!t?.matches?.(PROMPT_SELECTOR)) return;
-        const text = readText(t);
-        if (!text || text.trim().length < 24) return;
-        if (promptTimer) clearTimeout(promptTimer);
-        promptTimer = setTimeout(() => void analyzePrompt(text), 700);
-      },
-      { capture: true }
-    );
-    async function analyzePrompt(text) {
+    document.addEventListener("input", (e) => {
+      const el = e.target;
+      if (!el?.matches?.(PROMPT_SEL)) return;
+      const text = readText(el);
+      if (!text || text.trim().length < 24) return;
+      overlay.showPromptResults(localScore(text), localSuggestions(text, localScore(text)), true);
+      if (promptTimer) clearTimeout(promptTimer);
+      promptTimer = setTimeout(() => void remotePrompt(text), 1e3);
+    }, { capture: true });
+    async function remotePrompt(text) {
       try {
-        const hash = await sha256(text.replace(/\s+/g, " ").trim().toLowerCase());
+        const hash = await sha256(text.trim().toLowerCase().replace(/\s+/g, " "));
         if (hash === lastPromptHash) return;
         lastPromptHash = hash;
-        overlay.showPromptAnalyzing();
-        const stableId = await getStableBrowserId();
-        const user_hash = await hashUserServerSide(stableId);
+        const user_hash = await getUserHash();
         const { event_id } = await postEvent({
           kind: "prompt",
           content: text,
-          metadata: {
-            user_hash,
-            url: location.href,
-            context: inferContext(text),
-            public: false
-          }
+          metadata: { user_hash, url: location.href, public: false }
         });
         const ar = await getAnalysis(event_id);
-        overlay.showPromptResults(ar.scores, buildPromptSuggestions(text, ar.scores));
+        overlay.showPromptResults(ar.scores, localSuggestions(text, ar.scores), false);
       } catch (e) {
-        overlay.showError(e instanceof Error ? e.message : "Prompt analysis failed");
+        overlay.appendNote(e instanceof Error ? e.message : "Backend unreachable");
       }
     }
-    const RESPONSE_SELECTORS = [
-      '[data-testid="ai-response"]',
+    const RESPONSE_SELS = [
+      // ChatGPT
+      '[data-message-author-role="assistant"]',
+      // Claude
       '[data-testid="conversation-turn-content"]',
+      ".font-claude-message",
+      // Generic
       ".assistant-message",
       ".response-content",
-      ".ai-output",
-      // Claude.ai
-      "[data-is-streaming]",
-      ".font-claude-message",
-      // ChatGPT
-      '[data-message-author-role="assistant"]'
+      '[data-testid="ai-response"]',
+      // Gemini
+      "message-content",
+      ".model-response-text",
+      // Perplexity
+      ".prose"
     ];
     function getLatestResponse() {
-      for (const sel of RESPONSE_SELECTORS) {
-        const nodes = Array.from(document.querySelectorAll(sel));
-        if (nodes.length) {
-          const last = nodes[nodes.length - 1];
-          const txt = (last.innerText || last.textContent || "").trim();
-          if (txt.length > 10) return txt;
-        }
+      for (const sel of RESPONSE_SELS) {
+        const nodes = [...document.querySelectorAll(sel)];
+        if (!nodes.length) continue;
+        const el = nodes.at(-1);
+        const txt = (el.innerText || el.textContent || "").trim();
+        if (txt.length > 80) return { el, text: txt };
       }
-      return "";
+      return null;
     }
-    let lastResponseSent = "";
+    let lastAnalyzedHash = "";
     let responseInFlight = false;
     let responseTimer = null;
-    function scheduleResponseAnalysis(text) {
-      if (responseTimer) clearTimeout(responseTimer);
-      responseTimer = setTimeout(() => {
-        if (text !== lastResponseSent && !responseInFlight) {
-          lastResponseSent = text;
-          void analyzeResponse(text);
-        }
-      }, 1200);
-    }
-    async function analyzeResponse(text) {
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !e.shiftKey) {
+        lastAnalyzedHash = "";
+        responseInFlight = false;
+        if (responseTimer) clearTimeout(responseTimer);
+        removeHighlight();
+        document.getElementById("quirra-toast")?.remove();
+        overlay.showResults({ duplication_pct: 0, style_pct: 0, risk: 0, seen_count: 0 }, [], [], true);
+      }
+    }, { capture: true });
+    async function analyzeResponse(text, el) {
+      const hash = await sha256(text.slice(0, 500));
+      if (hash === lastAnalyzedHash) return;
+      lastAnalyzedHash = hash;
       responseInFlight = true;
+      removeHighlight();
+      document.getElementById("quirra-toast")?.remove();
       try {
-        overlay.showAnalyzing();
-        const stableId = await getStableBrowserId();
-        const user_hash = await hashUserServerSide(stableId);
+        const user_hash = await getUserHash();
         const { event_id } = await postEvent({
           kind: "response",
           content: text,
-          metadata: {
-            user_hash,
-            url: location.href,
-            context: inferContext(text),
-            public: isPublicUrl(location.href)
-          }
+          metadata: { user_hash, url: location.href, public: false }
         });
         const analysis = await pollAnalysis(event_id);
-        overlay.showResults(analysis.scores, analysis.neighbors || [], analysis.labels);
+        overlay.showResults(
+          analysis.scores,
+          analysis.neighbors || [],
+          analysis.labels || [],
+          false
+        );
+        const dup = analysis.duplicate_alert;
+        if (dup?.detected) {
+          highlightResponse(el);
+          showToast(dup);
+          overlay.showDuplicateAlert(analysis.scores, dup);
+        }
       } catch (e) {
-        if (e instanceof DOMException && e.name === "AbortError") return;
-        overlay.showError(e instanceof Error ? e.message : "Response analysis failed");
+        overlay.appendNote(e instanceof Error ? e.message : "Backend unreachable");
       } finally {
         responseInFlight = false;
       }
     }
-    function findObserveTarget() {
+    let observeTarget = document.body;
+    let mo;
+    function getBestContainer() {
       const candidates = [
-        'main[class*="chat"]',
-        '[id*="chat"]',
+        "main",
+        '[role="main"]',
+        '[class*="chat"]',
         '[class*="conversation"]',
         '[class*="messages"]',
-        "main"
+        '[class*="thread"]'
       ];
       for (const sel of candidates) {
         const el = document.querySelector(sel);
-        if (el) return el;
+        if (el && el !== document.body) return el;
       }
       return document.body;
     }
-    const observeTarget = findObserveTarget();
-    const mo = new MutationObserver(() => {
-      const text = getLatestResponse();
-      if (text) scheduleResponseAnalysis(text);
-    });
-    mo.observe(observeTarget, {
+    function onMutation() {
+      if (observeTarget === document.body) {
+        const better = getBestContainer();
+        if (better !== document.body) {
+          mo.disconnect();
+          observeTarget = better;
+          mo.observe(observeTarget, OBS_OPTIONS);
+        }
+      }
+      const result = getLatestResponse();
+      if (!result) return;
+      if (!responseInFlight) {
+        overlay.showResults(localScore(result.text), [], [], true);
+      }
+      if (responseTimer) clearTimeout(responseTimer);
+      responseTimer = setTimeout(() => {
+        if (!responseInFlight) {
+          void analyzeResponse(result.text, result.el);
+        }
+      }, 1500);
+    }
+    const OBS_OPTIONS = {
       childList: true,
       subtree: true,
-      // Don't watch attribute/character changes — only structural DOM additions
       attributes: false,
       characterData: false
+    };
+    mo = new MutationObserver(onMutation);
+    observeTarget = getBestContainer();
+    mo.observe(observeTarget, OBS_OPTIONS);
+    const bodyWatcher = new MutationObserver(() => {
+      const better = getBestContainer();
+      if (better !== document.body && better !== observeTarget) {
+        mo.disconnect();
+        observeTarget = better;
+        mo.observe(observeTarget, OBS_OPTIONS);
+        bodyWatcher.disconnect();
+      }
     });
+    bodyWatcher.observe(document.body, { childList: true, subtree: false });
     window.addEventListener("beforeunload", () => {
       mo.disconnect();
+      bodyWatcher.disconnect();
+      if (promptTimer) clearTimeout(promptTimer);
       if (responseTimer) clearTimeout(responseTimer);
+      removeHighlight();
       overlay.destroy();
     });
     function readText(el) {
-      if (el.value != null)
-        return el.value;
-      return el.innerText || el.textContent || "";
+      return el.value ?? el.innerText ?? el.textContent ?? "";
     }
-    async function sha256(s) {
-      const buf = await crypto.subtle.digest(
-        "SHA-256",
-        new TextEncoder().encode(s)
-      );
-      return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, "0")).join("");
-    }
-    let pollAbortController = null;
-    async function pollAnalysis(id, maxTries = 5, baseDelayMs = 600) {
-      if (pollAbortController) pollAbortController.abort();
-      pollAbortController = new AbortController();
-      const signal = pollAbortController.signal;
-      for (let i = 0; i < maxTries; i++) {
+    let pollAbort = null;
+    async function pollAnalysis(id, tries = 6, baseMs = 600) {
+      if (pollAbort) pollAbort.abort();
+      pollAbort = new AbortController();
+      const { signal } = pollAbort;
+      for (let i = 0; i < tries; i++) {
         if (signal.aborted) throw new DOMException("Aborted", "AbortError");
         const r = await getAnalysis(id);
         if (!r.status || r.status === "done") return r;
-        if (r.status === "unavailable") throw new Error(r.status);
-        const delay = baseDelayMs * Math.pow(2, i);
-        await sleep(delay, signal);
+        if (r.status === "unavailable") throw new Error("Backend unavailable");
+        await sleep(baseMs * Math.pow(2, i), signal);
       }
       return getAnalysis(id);
     }
     function sleep(ms, signal) {
-      return new Promise((resolve, reject) => {
-        const t = setTimeout(resolve, ms);
+      return new Promise((res, rej) => {
+        const t = setTimeout(res, ms);
         signal?.addEventListener("abort", () => {
           clearTimeout(t);
-          reject(new DOMException("Aborted", "AbortError"));
+          rej(new DOMException("Aborted", "AbortError"));
         });
       });
-    }
-    function buildPromptSuggestions(text, scores) {
-      const s = [];
-      const t = text.trim();
-      if (t.length < 80) s.push("Add specifics: audience, domain, constraints, and examples.");
-      if (!/[?.!]/.test(t)) s.push("Ask as a clear question or add an objective.");
-      if (!/\bn\b|\bwords?\b|\bsteps?\b|\bformat\b|\bstyle\b/i.test(t))
-        s.push("Specify length, format, and writing style.");
-      if (/\bjailbreak|\bbypass|\bignore\b.*(rules|instructions)/i.test(t))
-        s.push("Remove jailbreak cues or policy-bypassing language.");
-      if (scores.style_pct > 70)
-        s.push("Vary sentence structure and avoid boilerplate phrases.");
-      if (!s.length) s.push("Nice prompt. Refine with target, style, and constraints if needed.");
-      return s;
     }
   }
 })();
