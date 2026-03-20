@@ -51,19 +51,25 @@ export class QuirraOverlay {
     header.innerHTML = `
       <span class="qr-title">Quirra</span>
       <div class="qr-controls">
-        <button class="qr-btn" data-action="opacity" title="Transparency">
-          <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><path d="M12 3a9 9 0 1 0 0 18A9 9 0 0 0 12 3zm0 2a7 7 0 0 1 0 14V5z"/></svg>
+        <button class="qr-btn" data-action="opacity" title="Adjust transparency">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M12 3a9 9 0 1 0 0 18A9 9 0 0 0 12 3zm0 2a7 7 0 0 1 0 14V5z"/>
+          </svg>
         </button>
-        <button class="qr-btn" data-action="resize" title="Compact/Full">
-          <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><path d="M4 8h16v2H4zm0 6h16v2H4z"/></svg>
+        <button class="qr-btn" data-action="resize" title="Toggle compact/full">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M4 8h16v2H4zm0 6h16v2H4z"/>
+          </svg>
         </button>
         <button class="qr-btn qr-btn-min" data-action="minimize" title="Minimize to Q">
-          <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><path d="M19 13H5v-2h14v2z"/></svg>
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M19 13H5v-2h14v2z"/>
+          </svg>
         </button>
       </div>
     `;
 
-    // Wire controls
+    // Wire up control buttons
     header.querySelector(".qr-controls")!.addEventListener("click", (e) => {
       const btn = (e.target as HTMLElement).closest("[data-action]") as HTMLElement | null;
       if (!btn) return;
@@ -76,19 +82,20 @@ export class QuirraOverlay {
 
     this.makeDraggable(header);
 
-    // Opacity slider
+    // Opacity slider — hidden by default, revealed by opacity button
     this.slider = document.createElement("input");
     this.slider.type      = "range";
-    this.slider.min       = "20";
+    this.slider.min       = "15";
     this.slider.max       = "98";
     this.slider.value     = String(Math.round(this.opacity * 100));
     this.slider.className = "qr-opacity-slider qr-hidden";
+    this.slider.title     = "Drag to adjust transparency";
     this.slider.addEventListener("input", () => {
       this.opacity = Number(this.slider.value) / 100;
       this.card.style.background = `rgba(14,14,20,${this.opacity})`;
     });
 
-    // Body
+    // Body — scrollable content area
     this.body = document.createElement("div");
     this.body.className = "qr-body";
 
@@ -129,7 +136,9 @@ export class QuirraOverlay {
       </div>
       <div class="qr-section">
         <div class="qr-lbl">Suggestions</div>
-        <ul class="qr-list">${suggestions.map(s => `<li>${esc(s)}</li>`).join("")}</ul>
+        <ul class="qr-list">
+          ${suggestions.map(s => `<li>${esc(s)}</li>`).join("")}
+        </ul>
       </div>
     `;
   }
@@ -165,7 +174,7 @@ export class QuirraOverlay {
 
   showDuplicateAlert(scores: Scores, alert: DuplicateAlert) {
     this.mount();
-    this.setState("full"); // Force open
+    this.setState("full"); // force expand
     this.setBubbleRisk(scores.risk, true);
 
     const firstSeen  = alert.first_seen
@@ -218,8 +227,8 @@ export class QuirraOverlay {
 
   private applyState() {
     const min = this.state === "minimized";
-    this.bubble.style.display = min ? "flex"   : "none";
-    this.card.style.display   = min ? "none"   : "flex";
+    this.bubble.style.display = min ? "flex"  : "none";
+    this.card.style.display   = min ? "none"  : "flex";
     this.card.classList.toggle("qr-compact", this.state === "compact");
   }
 
@@ -261,43 +270,43 @@ export class QuirraOverlay {
     const s = document.createElement("style");
     s.id = "quirra-styles";
     s.textContent = `
-      /* Root */
+      /* ── Root ── */
       .qr-root{position:fixed;right:16px;bottom:16px;z-index:2147483646;font-family:system-ui,-apple-system,sans-serif;user-select:none}
 
-      /* Q Bubble */
-      .qr-bubble{width:36px;height:36px;border-radius:50%;background:rgba(14,14,20,.88);border:1.5px solid rgba(255,255,255,.18);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);display:flex;align-items:center;justify-content:center;cursor:pointer;box-shadow:0 4px 16px rgba(0,0,0,.4);transition:transform .15s,box-shadow .15s}
-      .qr-bubble:hover{transform:scale(1.12)}
-      .qr-bubble-q{color:#fff;font-size:15px;font-weight:700;letter-spacing:-.5px}
-      .qr-bubble-green{border-color:rgba(52,211,153,.65);box-shadow:0 0 0 2px rgba(52,211,153,.2)}
-      .qr-bubble-amber{border-color:rgba(245,158,11,.65);box-shadow:0 0 0 2px rgba(245,158,11,.2)}
-      .qr-bubble-red{border-color:rgba(248,113,113,.65);box-shadow:0 0 0 2px rgba(248,113,113,.2)}
-      .qr-bubble-dup{border-color:rgba(248,113,113,.85);animation:qrBubblePulse 1s ease-in-out infinite}
+      /* ── Q Bubble ── */
+      .qr-bubble{width:38px;height:38px;border-radius:50%;background:rgba(14,14,20,.88);border:1.5px solid rgba(255,255,255,.2);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);display:flex;align-items:center;justify-content:center;cursor:pointer;box-shadow:0 4px 16px rgba(0,0,0,.45);transition:transform .15s,box-shadow .15s}
+      .qr-bubble:hover{transform:scale(1.1)}
+      .qr-bubble-q{color:#fff;font-size:16px;font-weight:700;letter-spacing:-.5px;pointer-events:none}
+      .qr-bubble-green{border-color:rgba(52,211,153,.7);box-shadow:0 0 0 2px rgba(52,211,153,.2)}
+      .qr-bubble-amber{border-color:rgba(245,158,11,.7);box-shadow:0 0 0 2px rgba(245,158,11,.2)}
+      .qr-bubble-red{border-color:rgba(248,113,113,.7);box-shadow:0 0 0 2px rgba(248,113,113,.2)}
+      .qr-bubble-dup{border-color:rgba(248,113,113,.9);animation:qrBubblePulse 1s ease-in-out infinite}
       @keyframes qrBubblePulse{0%,100%{box-shadow:0 0 0 3px rgba(248,113,113,.35)}50%{box-shadow:0 0 0 7px rgba(248,113,113,.08)}}
 
-      /* Card */
-      .qr-card{display:flex;flex-direction:column;min-width:260px;max-width:min(340px,88vw);border-radius:14px;background:rgba(14,14,20,.85);border:1px solid rgba(255,255,255,.13);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);color:#f0f0f4;font-size:12px;line-height:1.5;box-shadow:0 12px 32px rgba(0,0,0,.45);overflow:hidden}
+      /* ── Card ── */
+      .qr-card{display:flex;flex-direction:column;min-width:268px;max-width:min(348px,90vw);border-radius:14px;background:rgba(14,14,20,.85);border:1px solid rgba(255,255,255,.13);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);color:#f0f0f4;font-size:12px;line-height:1.5;box-shadow:0 12px 32px rgba(0,0,0,.45);overflow:hidden}
       .qr-card.qr-compact .qr-body{display:none}
-      .qr-card.qr-compact{min-width:180px}
+      .qr-card.qr-compact{min-width:190px}
 
-      /* Header */
+      /* ── Header ── */
       .qr-header{display:flex;align-items:center;justify-content:space-between;padding:8px 10px 6px;border-bottom:1px solid rgba(255,255,255,.07);cursor:grab}
       .qr-header:active{cursor:grabbing}
       .qr-title{font-size:12px;font-weight:650;letter-spacing:.2px}
 
-      /* Controls */
-      .qr-controls{display:flex;gap:2px}
-      .qr-btn{width:20px;height:20px;border-radius:5px;border:none;background:transparent;color:rgba(255,255,255,.45);cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;transition:background .12s,color .12s}
-      .qr-btn:hover{background:rgba(255,255,255,.1);color:#fff}
+      /* ── Controls (opacity, resize, minimize buttons) ── */
+      .qr-controls{display:flex;gap:2px;align-items:center}
+      .qr-btn{width:22px;height:22px;border-radius:5px;border:none;background:transparent;color:rgba(255,255,255,.45);cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;transition:background .12s,color .12s;flex-shrink:0}
+      .qr-btn:hover{background:rgba(255,255,255,.12);color:#fff}
       .qr-btn-min:hover{background:rgba(248,113,113,.2);color:#fca5a5}
 
-      /* Slider */
-      .qr-opacity-slider{width:calc(100% - 20px);margin:0 10px 6px;accent-color:#6366f1;height:3px;cursor:pointer}
+      /* ── Opacity slider ── */
+      .qr-opacity-slider{width:calc(100% - 20px);margin:4px 10px 2px;accent-color:#6366f1;height:3px;cursor:pointer;border-radius:2px}
       .qr-hidden{display:none!important}
 
-      /* Body */
-      .qr-body{padding:8px 10px 10px;max-height:300px;overflow-y:auto;scrollbar-width:thin;scrollbar-color:rgba(255,255,255,.12) transparent}
+      /* ── Body ── */
+      .qr-body{padding:8px 10px 10px;max-height:320px;overflow-y:auto;scrollbar-width:thin;scrollbar-color:rgba(255,255,255,.12) transparent}
 
-      /* Elements */
+      /* ── Content ── */
       .qr-metrics{display:flex;align-items:center;flex-wrap:wrap;gap:4px;margin-bottom:5px}
       .qr-lsm{font-size:10px;color:rgba(255,255,255,.4);text-transform:uppercase;letter-spacing:.5px}
       .qr-muted{color:rgba(255,255,255,.45)}
@@ -309,11 +318,11 @@ export class QuirraOverlay {
       .qr-green{color:#34d399}.qr-amber{color:#f59e0b}.qr-red{color:#f87171}
       .qr-card a{color:#93c5fd}
 
-      /* Badge */
+      /* ── Live badge ── */
       .qr-badge{font-size:9px;padding:1px 6px;border-radius:999px;background:rgba(99,102,241,.25);color:#a5b4fc;border:1px solid rgba(99,102,241,.3);animation:qrPulse 1.4s ease-in-out infinite alternate}
       @keyframes qrPulse{from{opacity:.4}to{opacity:1}}
 
-      /* Chips */
+      /* ── Label chips ── */
       .qr-chips{display:flex;flex-wrap:wrap;gap:3px;margin:4px 0 5px}
       .qr-chip{font-size:10px;padding:1px 7px;border-radius:999px;border:1px solid rgba(255,255,255,.1)}
       .qr-chip-red{background:rgba(248,113,113,.15);color:#fca5a5;border-color:rgba(248,113,113,.28)}
@@ -321,7 +330,7 @@ export class QuirraOverlay {
       .qr-chip-violet{background:rgba(167,139,250,.15);color:#c4b5fd;border-color:rgba(167,139,250,.28)}
       .qr-chip-grey{background:rgba(255,255,255,.06);color:rgba(255,255,255,.6)}
 
-      /* Duplicate banner */
+      /* ── Duplicate alert banner ── */
       .qr-dup-banner{display:flex;gap:9px;align-items:flex-start;background:rgba(248,113,113,.1);border:1px solid rgba(248,113,113,.3);border-radius:10px;padding:9px 10px}
       .qr-dup-icon{font-size:15px;flex-shrink:0;margin-top:1px}
       .qr-dup-title{font-weight:650;font-size:12px;color:#fca5a5;margin-bottom:2px}
@@ -329,8 +338,7 @@ export class QuirraOverlay {
       .qr-dup-stats{display:flex;gap:6px;margin-top:5px;flex-wrap:wrap}
       .qr-dup-stat{font-size:10px;padding:1px 7px;border-radius:999px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.12)}
       .qr-dm{font-size:10px;color:rgba(255,255,255,.5);margin-top:4px}
-      .qr-dm a{color:#fca5a5}
-      .qr-dm b{color:rgba(255,255,255,.8)}
+      .qr-dm a{color:#fca5a5}.qr-dm b{color:rgba(255,255,255,.8)}
     `;
     document.head.appendChild(s);
   }
@@ -357,5 +365,5 @@ function ago(iso?: string) {
   return `${Math.floor(h / 24)}d ago`;
 }
 function shortUrl(url: string) {
-  try { const u = new URL(url); return u.hostname; } catch { return url.slice(0, 30); }
+  try { return new URL(url).hostname; } catch { return url.slice(0, 30); }
 }
